@@ -23,7 +23,12 @@ export async function createServerSupabaseClient() {
       },
       setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value, options }) => {
-          cookieStore.set(name, value, options);
+          try {
+            cookieStore.set(name, value, options);
+          } catch {
+            // In Server Components, Next.js disallows cookie mutation.
+            // Middleware and Server Actions are responsible for persisting refresh cookies.
+          }
         });
       },
     },

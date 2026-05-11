@@ -1,8 +1,10 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { logAuditEvent } from "@/lib/audit";
+import { classifyTransaction } from "@/lib/ai/classification";
 import { enforceServerSecretPolicy } from "@/lib/security/baseline";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -27,6 +29,136 @@ function parseSelectedTransactionIds(formData: FormData) {
     .getAll("transactionIds")
     .map((value) => String(value).trim())
     .filter((value) => value.length > 0);
+}
+
+function parseReturnTo(formData: FormData, fallback = "/dashboard") {
+  const value = String(formData.get("returnTo") ?? fallback).trim();
+  return value.startsWith("/") ? value : fallback;
+}
+
+export async function createManualExpense(formData: FormData) {
+  enforceServerSecretPolicy();
+
+  const returnTo = parseReturnTo(formData);
+  const merchant = String(formData.get("merchant") ?? "").trim();
+  const amountRaw = String(formData.get("amount") ?? "").trim();
+  const source = String(formData.get("source") ?? "unknown").trim().toLowerCase();
+  const referenceRaw = String(formData.get("reference") ?? "").trim();
+  const categoryRaw = String(formData.get("category") ?? "").trim();
+  const dateRaw = String(formData.get("date") ?? "").trim();
+
+  if (merchant.length < 2 || merchant.length > 120) {
+    redirect(`${returnTo}?error=${toRedirectParam("Merchant must be 2-120 characters.")}`);
+  }
+
+  const amount = Number.parseFloat(amountRaw);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    redirect(`${returnTo}?error=${toRedirectParam("Amount must be a positive number.")}`);
+  }
+
+  if (!VALID_SOURCES.has(source)) {
+    redirect(
+      `${returnTo}?error=${toRedirectParam("Source must be one of UPI, card, wallet, bank, unknown.")}`,
+    );
+  }
+
+  const parsedDate = new Date(dateRaw);
+  if (Number.isNaN(parsedDate.getTime())) {
+    redirect(`${returnTo}?error=${toRedirectParam("Date must be valid.")}`);
+  }
+
+  const category = categoryRaw.length === 0 ? null : categoryRaw;
+  if (category && (category.length < 2 || category.length > 40)) {
+    redirect(
+      `${returnTo}?error=${toRedirectParam(
+        "Category must be 2-40 characters when provided.",
+      )}`,
+    );
+  }
+
+  const reference = referenceRaw.length === 0 ? null : referenceRaw;
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/sign-in");
+  }
+
+  const ingestionId = `manual:${user.id}:${Date.now()}:${randomUUID()}`;
+  const now = new Date().toISOString();
+
+  const { data: inserted, error: insertError } = await supabase
+    .from("transactions")
+    .insert({
+      user_id: user.id,
+      ingestion_id: ingestionId,
+      amount: Number(amount.toFixed(2)),
+      merchant,
+      source,
+      reference,
+      category,
+      date: parsedDate.toISOString(),
+      ai_classification: null,
+      ai_reason: null,
+      ai_raw_classification: null,
+      ai_raw_reason: null,
+      ai_user_classification: null,
+      ai_user_reason: null,
+      ai_review_state: "pending",
+      ai_override_at: null,
+      created_at: now,
+      updated_at: now,
+    })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (insertError) {
+    console.error("Manual expense insert error:", insertError);
+    const errorMsg = insertError.message || "Could not save manual expense. Please retry.";
+    redirect(`${returnTo}?error=${toRedirectParam(errorMsg)}`);
+  }
+
+  if (!inserted) {
+    redirect(`${returnTo}?error=${toRedirectParam("No transaction ID returned. Please retry.")}`);
+  }
+
+  const classification = await classifyTransaction({
+    merchant,
+    amount: Number(amount.toFixed(2)),
+    source,
+    category,
+    reference,
+  });
+
+  if (classification.ok) {
+    const { error: classificationError } = await supabase
+      .from("transactions")
+      .update({
+        ai_classification: classification.label,
+        ai_reason: classification.reason,
+        ai_raw_classification: classification.label,
+        ai_raw_reason: classification.reason,
+        ai_user_classification: null,
+        ai_user_reason: null,
+        ai_review_state: "pending",
+        ai_override_at: null,
+      })
+      .eq("id", inserted.id)
+      .eq("user_id", user.id);
+
+    if (classificationError) {
+      console.error("Classification update error:", classificationError);
+    }
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/transactions");
+  revalidatePath("/budgets");
+
+  redirect(`${returnTo}?message=${toRedirectParam("Manual expense saved.")}`);
 }
 
 export async function assignTransactionCategory(formData: FormData) {

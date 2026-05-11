@@ -5,6 +5,7 @@ import {
   saveBudgetAlertPreferences,
   upsertBudget,
 } from "@/app/budgets/actions";
+import { MobileFinanceNav } from "@/app/components/mobile-finance-nav";
 import {
   evaluateBudgetAlerts,
   getOrCreateBudgetAlertPreference,
@@ -113,41 +114,41 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
   const editBudget = editId ? budgetList.find((b) => b.id === editId) ?? null : null;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-10">
+    <main className="finance-shell mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-5 py-8 sm:px-6 sm:py-10">
       <header className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-950">Budget Planning</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Budget Planning</h1>
           <Link
-            className="text-sm font-medium text-teal-700 hover:text-teal-900"
+              className="text-sm font-medium text-cyan-200 hover:text-cyan-100"
             href="/dashboard"
           >
             ← Dashboard
           </Link>
         </div>
-        <p className="text-sm text-slate-600">
-          Set monthly spending limits per category. Zeph will track utilization and alert you before you overspend.
+        <p className="text-sm text-slate-300">
+           Set monthly spending limits per category. Zeph will track utilization and alert you before you overspend.
         </p>
       </header>
 
       {message ? (
-        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800">
+        <div className="rounded-lg border border-emerald-300/40 bg-emerald-950/35 px-4 py-3 text-sm font-medium text-emerald-100">
           {message}
         </div>
       ) : null}
       {error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+        <div className="rounded-lg border border-rose-300/40 bg-rose-950/35 px-4 py-3 text-sm font-medium text-rose-100">
           {error}
         </div>
       ) : null}
       {fetchError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <div className="rounded-lg border border-rose-300/40 bg-rose-950/35 px-4 py-3 text-sm text-rose-100">
           Could not load budgets right now. Please refresh.
         </div>
       ) : null}
 
-      <section className="rounded-xl border border-amber-200 bg-amber-50/40 p-6 shadow-sm">
-        <h2 className="text-base font-semibold text-amber-950">Budget alert preferences</h2>
-        <p className="mt-2 text-sm text-amber-900/80">
+      <section className="rounded-xl border border-amber-300/35 bg-amber-950/30 p-5 shadow-sm sm:p-6">
+          <h2 className="text-base font-semibold text-amber-100">Budget alert preferences</h2>
+        <p className="mt-2 text-sm text-amber-200/90">
           Configure threshold and channel settings for proactive budget warnings.
         </p>
 
@@ -155,7 +156,7 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
           <input type="hidden" name="returnTo" value="/budgets" />
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="inline-flex items-center gap-2 text-sm text-slate-800">
+            <label className="inline-flex items-center gap-2 text-sm text-slate-100">
               <input
                 defaultChecked={alertPreference.alert_75_enabled}
                 name="alert75Enabled"
@@ -163,7 +164,7 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
               />
               Alert at 75%
             </label>
-            <label className="inline-flex items-center gap-2 text-sm text-slate-800">
+            <label className="inline-flex items-center gap-2 text-sm text-slate-100">
               <input
                 defaultChecked={alertPreference.alert_100_enabled}
                 name="alert100Enabled"
@@ -171,7 +172,7 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
               />
               Alert at 100%
             </label>
-            <label className="inline-flex items-center gap-2 text-sm text-slate-800">
+            <label className="inline-flex items-center gap-2 text-sm text-slate-100">
               <input
                 defaultChecked={alertPreference.in_app_enabled}
                 name="inAppEnabled"
@@ -179,7 +180,7 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
               />
               In-app alerts
             </label>
-            <label className="inline-flex items-center gap-2 text-sm text-slate-800">
+            <label className="inline-flex items-center gap-2 text-sm text-slate-100">
               <input
                 defaultChecked={alertPreference.push_enabled}
                 name="pushEnabled"
@@ -187,7 +188,7 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
               />
               Push alerts
             </label>
-            <label className="inline-flex items-center gap-2 text-sm text-slate-800 sm:col-span-2">
+            <label className="inline-flex items-center gap-2 text-sm text-slate-100 sm:col-span-2">
               <input
                 defaultChecked={alertPreference.email_enabled}
                 name="emailEnabled"
@@ -198,7 +199,7 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
           </div>
 
           <button
-            className="rounded-md bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800"
+            className="rounded-lg bg-amber-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-800"
             type="submit"
           >
             Save alert preferences
@@ -206,22 +207,22 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
         </form>
       </section>
 
-      <section className="rounded-xl border border-rose-200 bg-rose-50/40 p-6 shadow-sm">
-        <h2 className="text-base font-semibold text-rose-950">Recent budget alerts</h2>
+      <section className="rounded-xl border border-rose-300/35 bg-rose-950/28 p-5 shadow-sm sm:p-6">
+          <h2 className="text-base font-semibold text-rose-100">Recent budget alerts</h2>
 
         {recentAlerts.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-600">
+            <p className="mt-2 text-sm text-slate-200">
             No alerts triggered for {thisMonth} yet.
           </p>
         ) : (
           <ul className="mt-3 space-y-2">
             {recentAlerts.map((alert) => (
-              <li key={alert.id} className="rounded-md border border-rose-200 bg-white p-3">
-                <p className="text-sm font-medium text-slate-900">{alert.message}</p>
-                <p className="mt-1 text-xs text-slate-600">
+              <li key={alert.id} className="rounded-md border border-rose-300/40 bg-slate-950/25 p-3">
+                <p className="text-sm font-medium text-slate-100">{alert.message}</p>
+                <p className="mt-1 break-words text-xs text-slate-300/85">
                   Threshold: {alert.threshold}% • Spent: INR {Number(alert.spent_amount).toFixed(2)} • Limit: INR {Number(alert.budget_limit).toFixed(2)}
                 </p>
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 text-xs text-slate-300/75">
                   Triggered at {new Date(alert.created_at).toLocaleString()}
                 </p>
 
@@ -230,17 +231,17 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
                   if (!guidance) return null;
 
                   return (
-                    <details className="mt-2 rounded-md border border-rose-100 bg-rose-50/40 px-3 py-2">
-                      <summary className="cursor-pointer text-xs font-semibold text-rose-900">
+                    <details className="mt-2 rounded-md border border-rose-300/35 bg-rose-950/30 px-3 py-2">
+                      <summary className="cursor-pointer text-xs font-semibold text-rose-100">
                         View corrective guidance
                       </summary>
-                      <p className="mt-2 text-xs text-slate-700">
+                      <p className="mt-2 text-xs text-slate-200">
                         Category: <span className="font-medium capitalize">{guidance.categoryLabel}</span> • Status: {guidance.categoryStatus}
                       </p>
-                      <p className="mt-1 text-xs text-slate-700">
+                      <p className="mt-1 text-xs text-slate-200">
                         Remaining amount: INR {guidance.remainingAmount.toFixed(2)} • Utilization: {guidance.percentUsed}%
                       </p>
-                      <ul className="mt-2 space-y-1 text-xs text-slate-700">
+                      <ul className="mt-2 space-y-1 text-xs text-slate-200">
                         {guidance.recommendedActions.map((action) => (
                           <li key={action}>- {action}</li>
                         ))}
@@ -255,8 +256,8 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
       </section>
 
       {/* Create / Edit form */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-base font-semibold text-slate-900">
+      <section className="rounded-xl border border-slate-300/35 bg-slate-950/35 p-5 shadow-sm sm:p-6">
+          <h2 className="text-base font-semibold text-slate-100">
           {editBudget ? "Edit budget" : "Add a budget"}
         </h2>
         <form action={upsertBudget} className="mt-4 flex flex-col gap-4">
@@ -271,11 +272,11 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
 
           {!editBudget ? (
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-slate-700" htmlFor="budget-category">
+              <label className="text-sm font-medium text-slate-200" htmlFor="budget-category">
                 Category
               </label>
               <input
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                className="rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus:border-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                 id="budget-category"
                 name="category"
                 placeholder="e.g. Food, Entertainment, Travel"
@@ -285,8 +286,8 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
             </div>
           ) : (
             <div className="flex flex-col gap-1">
-              <p className="text-sm font-medium text-slate-700">Category</p>
-              <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900">
+              <p className="text-sm font-medium text-slate-200">Category</p>
+              <p className="rounded-md border border-slate-400/35 bg-slate-900/35 px-3 py-2 text-sm text-slate-100">
                 {editBudget.category}
               </p>
             </div>
@@ -294,11 +295,11 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
 
           {!editBudget ? (
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-slate-700" htmlFor="budget-month">
+              <label className="text-sm font-medium text-slate-200" htmlFor="budget-month">
                 Month
               </label>
               <input
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                className="rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 focus:border-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                 defaultValue={thisMonth}
                 id="budget-month"
                 name="month"
@@ -310,19 +311,19 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
             </div>
           ) : (
             <div className="flex flex-col gap-1">
-              <p className="text-sm font-medium text-slate-700">Month</p>
-              <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900">
+              <p className="text-sm font-medium text-slate-200">Month</p>
+              <p className="rounded-md border border-slate-400/35 bg-slate-900/35 px-3 py-2 text-sm text-slate-100">
                 {editBudget.month}
               </p>
             </div>
           )}
 
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-slate-700" htmlFor="budget-limit">
+            <label className="text-sm font-medium text-slate-200" htmlFor="budget-limit">
               Monthly limit (INR)
             </label>
             <input
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+              className="rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus:border-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-500"
               defaultValue={editBudget ? editBudget.amount_limit : ""}
               id="budget-limit"
               min="1"
@@ -334,16 +335,16 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
             />
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
             <button
-              className="rounded-md bg-teal-700 px-5 py-2 text-sm font-medium text-white hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:ring-offset-2"
+              className="rounded-lg bg-teal-700 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:ring-offset-2"
               type="submit"
             >
               {editBudget ? "Save changes" : "Add budget"}
             </button>
             {editBudget ? (
               <Link
-                className="text-sm font-medium text-slate-500 hover:text-slate-700"
+                className="text-sm font-medium text-slate-300 hover:text-slate-100"
                 href="/budgets"
               >
                 Cancel
@@ -354,15 +355,15 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
       </section>
 
       {/* Budget list */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-base font-semibold text-slate-900">Your budgets</h2>
+      <section className="rounded-xl border border-slate-300/35 bg-slate-950/35 p-5 shadow-sm sm:p-6">
+          <h2 className="text-base font-semibold text-slate-100">Your budgets</h2>
 
         {budgetList.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">
+            <p className="mt-3 text-sm text-slate-300">
             No budgets yet. Add your first budget above to start tracking.
           </p>
         ) : (
-          <div className="mt-4 flex flex-col divide-y divide-slate-100">
+          <div className="mt-4 flex flex-col divide-y divide-slate-700/40">
             {budgetList.map((budget) => {
               const util = utilizationMap.get(budget.id) ?? null;
               const isCurrentMonth = budget.month === thisMonth;
@@ -379,22 +380,22 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
                 <div key={budget.id} className="flex flex-col gap-2 py-4">
                   <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-sm font-medium capitalize text-slate-900">
+                      <span className="text-sm font-medium capitalize text-slate-100">
                         {budget.category}
                         {isCurrentMonth ? (
-                          <span className="ml-2 rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800">
+                          <span className="ml-2 rounded-full border border-cyan-300/40 bg-cyan-500/20 px-2 py-0.5 text-xs font-medium text-cyan-100">
                             Current month
                           </span>
                         ) : null}
                       </span>
-                      <span className="text-xs text-slate-500">{budget.month}</span>
+                      <span className="text-xs text-slate-300">{budget.month}</span>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <span className="text-sm font-semibold text-slate-900">
+                    <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+                      <span className="text-sm font-semibold text-slate-100">
                         Limit: INR {Number(budget.amount_limit).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                       <Link
-                        className="text-xs font-medium text-teal-700 hover:text-teal-900"
+                        className="text-xs font-medium text-cyan-200 hover:text-cyan-100"
                         href={`/budgets?edit=${budget.id}`}
                       >
                         Edit
@@ -403,7 +404,7 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
                         <input type="hidden" name="budgetId" value={budget.id} />
                         <input type="hidden" name="returnTo" value="/budgets" />
                         <button
-                          className="text-xs font-medium text-red-600 hover:text-red-800"
+                          className="text-xs font-medium text-rose-200 hover:text-rose-100"
                           type="submit"
                         >
                           Delete
@@ -414,34 +415,34 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
 
                   {isCurrentMonth && util ? (
                     <div className="flex flex-col gap-1">
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
                         <div
                           className={`h-2 rounded-full transition-all ${barColor}`}
                           style={{ width: `${barWidth}%` }}
                         />
                       </div>
-                      <div className="flex items-center justify-between text-xs text-slate-600">
+                      <div className="flex flex-col gap-1 text-xs text-slate-300/85 sm:flex-row sm:items-center sm:justify-between">
                         <span>
                           Spent: INR {util.spent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           {" "}
-                          <span className={util.isOver ? "font-semibold text-red-700" : util.isNearLimit ? "font-semibold text-amber-700" : ""}>
+                          <span className={util.isOver ? "font-semibold text-rose-200" : util.isNearLimit ? "font-semibold text-amber-200" : ""}>
                             ({util.pct}%)
                           </span>
                         </span>
                         <span>
                           {util.isOver
-                            ? <span className="font-semibold text-red-700">Over budget by INR {(util.spent - Number(budget.amount_limit)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            ? <span className="font-semibold text-rose-200">Over budget by INR {(util.spent - Number(budget.amount_limit)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                             : <span>Remaining: INR {util.remaining.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                           }
                         </span>
                       </div>
                       {util.isNearLimit && !util.isOver ? (
-                        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800">
+                        <p className="rounded-md border border-amber-300/40 bg-amber-950/30 px-3 py-1.5 text-xs font-medium text-amber-100">
                           You&apos;ve used {util.pct}% of this budget — consider slowing spend before the month ends.
                         </p>
                       ) : null}
                       {util.isOver ? (
-                        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-800">
+                        <p className="rounded-md border border-rose-300/40 bg-rose-950/30 px-3 py-1.5 text-xs font-medium text-rose-100">
                           Budget exceeded. Review your {budget.category} transactions to understand the overspend.
                         </p>
                       ) : null}
@@ -453,6 +454,8 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
           </div>
         )}
       </section>
+
+      <MobileFinanceNav active="/budgets" />
     </main>
   );
 }

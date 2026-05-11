@@ -45,6 +45,20 @@ const IMPULSE_HINTS = [
   "luxury",
 ];
 
+function isAnthropicBypassedForLocalDev(apiKey: string) {
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+
+  const normalized = apiKey.trim().toLowerCase();
+  return (
+    normalized === "local-dev-no-paid" ||
+    normalized === "dummy" ||
+    normalized === "placeholder" ||
+    normalized.startsWith("local-dev-")
+  );
+}
+
 function heuristicClassification(input: ClassificationInput): ClassificationSuccess {
   const category = (input.category ?? "").trim().toLowerCase();
   const merchant = input.merchant.trim().toLowerCase();
@@ -108,6 +122,14 @@ async function classifyWithAnthropic(input: ClassificationInput): Promise<Classi
     return {
       ok: false,
       reason: "ANTHROPIC_API_KEY is missing.",
+      retryable: false,
+    };
+  }
+
+  if (isAnthropicBypassedForLocalDev(apiKey)) {
+    return {
+      ok: false,
+      reason: "Anthropic disabled for local development.",
       retryable: false,
     };
   }

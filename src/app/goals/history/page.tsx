@@ -108,35 +108,35 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
   };
 
   return (
-    <main className="soft-fade-in relative mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-5 py-8 sm:px-8 sm:py-10">
+    <main className="finance-shell soft-fade-in relative mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-5 py-8 sm:px-8 sm:py-10">
       <header className="glass-card rounded-2xl p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">Goals history</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-300">Goals history</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-100">
               Completed, past, and archived
             </h1>
-            <p className="mt-2 text-sm text-slate-700">
+            <p className="mt-2 text-sm text-slate-300">
               Review prior goals to learn from savings journeys and restore archived items as needed.
             </p>
           </div>
-          <Link className="text-sm font-semibold text-cyan-800 hover:text-cyan-900" href="/goals">
+          <Link className="text-sm font-semibold text-cyan-200 hover:text-cyan-100" href="/goals">
             ← Active goals
           </Link>
         </div>
 
         <div className="mt-4 grid gap-2 sm:grid-cols-4">
-          <div className="rounded-xl border border-white/60 bg-white/65 px-3 py-2 text-sm text-slate-700">
-            Total: <span className="font-semibold text-slate-900">{summary.totalGoals}</span>
+          <div className="rounded-xl border border-slate-300/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-300">
+            Total: <span className="font-semibold text-slate-100">{summary.totalGoals}</span>
           </div>
-          <div className="rounded-xl border border-white/60 bg-white/65 px-3 py-2 text-sm text-slate-700">
-            Completed: <span className="font-semibold text-slate-900">{statusTotals.completed}</span>
+          <div className="rounded-xl border border-slate-300/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-300">
+            Completed: <span className="font-semibold text-slate-100">{statusTotals.completed}</span>
           </div>
-          <div className="rounded-xl border border-white/60 bg-white/65 px-3 py-2 text-sm text-slate-700">
-            Past deadline: <span className="font-semibold text-slate-900">{statusTotals.past}</span>
+          <div className="rounded-xl border border-slate-300/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-300">
+            Past deadline: <span className="font-semibold text-slate-100">{statusTotals.past}</span>
           </div>
-          <div className="rounded-xl border border-white/60 bg-white/65 px-3 py-2 text-sm text-slate-700">
-            Archived: <span className="font-semibold text-slate-900">{statusTotals.archived}</span>
+          <div className="rounded-xl border border-slate-300/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-300">
+            Archived: <span className="font-semibold text-slate-100">{statusTotals.archived}</span>
           </div>
         </div>
       </header>
@@ -151,7 +151,7 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
                 className={`rounded-xl border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
                   activeFilter === filter
                     ? "border-slate-900 bg-slate-900 text-white"
-                    : "border-slate-300 bg-white/75 text-slate-700 hover:bg-white"
+                    : "border-slate-400/35 bg-slate-950/25 text-slate-200 hover:bg-slate-900/55"
                 }`}
               >
                 {filter === "all"
@@ -169,7 +169,7 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
             type="text"
             placeholder="Search goals..."
             defaultValue={searchQuery}
-            className="flex-1 rounded-xl border border-slate-300/80 bg-white/80 px-3 py-1.5 text-sm placeholder:text-slate-400 hover:bg-white sm:max-w-sm"
+            className="flex-1 rounded-xl border border-slate-400/35 bg-slate-950/30 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-400 hover:bg-slate-900/55 sm:max-w-sm"
             onChange={(e) => {
               const q = e.currentTarget.value.trim();
               const url = new URL(window.location.href);
@@ -185,11 +185,11 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
         </div>
 
         {error ? (
-          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p className="mt-4 rounded-lg border border-rose-300/40 bg-rose-950/35 px-3 py-2 text-sm text-rose-100">
             Could not load goal history right now. Please refresh.
           </p>
         ) : pageRows.length === 0 ? (
-          <p className="mt-4 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+          <p className="mt-4 rounded-lg border border-slate-300/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-300">
             {searchQuery
               ? `No goals match "${searchQuery}" in this filter.`
               : "No goals match this filter yet."}
@@ -198,16 +198,16 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
           <>
             <ul className="mt-4 space-y-3">
               {pageRows.map((row) => (
-                <li key={row.goal.id} className="rounded-xl border border-slate-200 bg-white/80 p-4">
+                <li key={row.goal.id} className="rounded-xl border border-slate-300/35 bg-slate-950/30 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="text-lg font-semibold text-slate-900">{row.goal.name}</h2>
+                    <h2 className="text-lg font-semibold text-slate-100">{row.goal.name}</h2>
                     <span
                       className={`rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-wide ${
                         row.status === "completed"
                           ? "bg-emerald-100 text-emerald-800"
                           : row.status === "past"
                             ? "bg-amber-100 text-amber-800"
-                            : "bg-slate-100 text-slate-700"
+                            : "border border-slate-300/40 bg-slate-600/20 text-slate-100"
                       }`}
                     >
                       {row.status === "completed"
@@ -218,13 +218,13 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
                     </span>
                   </div>
 
-                  <p className="mt-2 text-sm text-slate-700">
+                  <p className="mt-2 text-sm text-slate-300">
                     INR {Number(row.goal.current_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     {" "}saved of INR {Number(row.goal.target_amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     {" "}({row.progress.percent}%)
                   </p>
 
-                  <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
+                  <div className="mt-2 grid gap-2 text-xs text-slate-300/85 sm:grid-cols-3">
                     <p>Deadline: {row.goal.deadline}</p>
                     <p>Last update: {new Date(row.goal.updated_at).toLocaleDateString()}</p>
                     <p>
@@ -234,7 +234,7 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
                     </p>
                   </div>
 
-                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-800/70">
                     <div
                       className={`h-2 rounded-full ${
                         row.status === "completed"
@@ -248,7 +248,7 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
                   </div>
 
                   {row.goal.notes ? (
-                    <p className="mt-2 text-xs text-slate-600">{row.goal.notes}</p>
+                    <p className="mt-2 text-xs text-slate-300/85">{row.goal.notes}</p>
                   ) : null}
 
                   <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -269,7 +269,7 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
                         <input type="hidden" name="returnTo" value={window.location.pathname + window.location.search} />
                         <button
                           type="submit"
-                          className="rounded-md border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                          className="rounded-md border border-slate-400/35 bg-slate-950/25 px-2.5 py-1.5 text-xs font-semibold text-slate-100 hover:bg-slate-900/55"
                         >
                           Archive
                         </button>
@@ -281,7 +281,7 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
             </ul>
 
             <nav aria-label="Pagination" className="mt-6 flex items-center justify-between">
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-slate-300">
                 Showing {start + 1}–{Math.min(end, totalRows)} of {totalRows}
               </p>
 
@@ -289,12 +289,12 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
                 {hasPrev ? (
                   <Link
                     href={`/goals/history${queryString({ filter: activeFilter, q: searchQuery, page: safePage - 1 })}`}
-                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="rounded-md border border-slate-400/35 bg-slate-950/25 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-900/55"
                   >
                     Previous
                   </Link>
                 ) : (
-                  <span className="rounded-md border border-slate-200 px-3 py-1.5 text-sm text-slate-400">
+                  <span className="rounded-md border border-slate-500/35 bg-slate-950/20 px-3 py-1.5 text-sm text-slate-400/90">
                     Previous
                   </span>
                 )}
@@ -302,12 +302,12 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
                 {hasNext ? (
                   <Link
                     href={`/goals/history${queryString({ filter: activeFilter, q: searchQuery, page: safePage + 1 })}`}
-                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="rounded-md border border-slate-400/35 bg-slate-950/25 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-900/55"
                   >
                     Next
                   </Link>
                 ) : (
-                  <span className="rounded-md border border-slate-200 px-3 py-1.5 text-sm text-slate-400">
+                  <span className="rounded-md border border-slate-500/35 bg-slate-950/20 px-3 py-1.5 text-sm text-slate-400/90">
                     Next
                   </span>
                 )}

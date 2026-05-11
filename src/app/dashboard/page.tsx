@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { signOut } from "@/app/(auth)/actions";
 import {
   assignTransactionCategory,
   bulkAssignTransactionCategory,
+  createManualExpense,
   editTransactionDetails,
   saveRecommendationAction,
 } from "@/app/dashboard/actions";
+import { MobileFinanceNav } from "@/app/components/mobile-finance-nav";
+import { SpendPieChart } from "@/app/dashboard/spend-pie-chart";
 import { DashboardStatusBanner } from "@/app/dashboard/status-banner";
+import { WeeklyExpenseChart } from "@/app/dashboard/weekly-expense-chart";
 import {
   evaluateBudgetAlerts,
   getOrCreateBudgetAlertPreference,
@@ -23,7 +26,6 @@ import { computeBudgetUtilization } from "@/lib/budgets/utilization";
 import { getMessageReadingConsent } from "@/lib/consent";
 import {
   buildCategoryBreakdown,
-  buildWaffleCells,
   periodBounds,
   type SpendRecord,
 } from "@/lib/insights/category-breakdown";
@@ -38,6 +40,7 @@ import {
 } from "@/lib/goals/milestones";
 import { computeGoalProgress, summarizeGoalProgress } from "@/lib/goals/progress";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { ArrowUpRight, Bolt, Brain, CircleDollarSign, Flag, Sparkles, Wallet } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -99,6 +102,19 @@ const wafflePalette: Record<string, string> = {
   Entertainment: "bg-fuchsia-400",
   Uncategorized: "bg-slate-400",
   Other: "bg-zinc-400",
+};
+
+// Hex equivalents for recharts Cell fill (Tailwind class strings are not valid SVG fill values)
+const chartPalette: Record<string, string> = {
+  Food: "#fbbf24",
+  Transport: "#38bdf8",
+  Groceries: "#34d399",
+  Bills: "#818cf8",
+  Shopping: "#fb7185",
+  Health: "#a3e635",
+  Entertainment: "#e879f9",
+  Uncategorized: "#94a3b8",
+  Other: "#a1a1aa",
 };
 
 type DashboardPageProps = {
@@ -197,9 +213,59 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     .lt("date", overviewBoundsCurrent.end.toISOString())
     .returns<SpendRecord[]>();
 
-  const breakdown = buildCategoryBreakdown(overviewRows ?? [], overviewStart, overviewEnd);
-  const waffleCells = buildWaffleCells(breakdown);
+  const selectedPeriodRows = (overviewRows ?? []).filter((row) => {
+    const at = new Date(row.date);
+    return at >= overviewStart && at < overviewEnd;
+  });
+
+  let chartWindowStart = overviewStart;
+  let chartWindowEnd = overviewEnd;
+  let chartWindowLabel = period === "this" ? "This week" : "Last week";
+  let chartRows = selectedPeriodRows;
+
+  // If the selected 7-day window has no spend data, fall back to last 30 days.
+  if (chartRows.length === 0) {
+    const fallbackBounds = periodBounds(30, new Date(), 0);
+    const { data: fallbackRows } = await supabase
+      .from("transactions")
+      .select("amount,category,date")
+      .eq("user_id", user.id)
+      .gte("date", fallbackBounds.start.toISOString())
+      .lt("date", fallbackBounds.end.toISOString())
+      .returns<SpendRecord[]>();
+
+    const recentRows = (fallbackRows ?? []).filter((row) => {
+      const at = new Date(row.date);
+      return at >= fallbackBounds.start && at < fallbackBounds.end;
+    });
+
+    if (recentRows.length > 0) {
+      chartRows = recentRows;
+      chartWindowStart = fallbackBounds.start;
+      chartWindowEnd = fallbackBounds.end;
+      chartWindowLabel = "Last 30 days";
+    }
+  }
+
+  const breakdown = buildCategoryBreakdown(chartRows, chartWindowStart, chartWindowEnd);
   const totalPeriodSpend = breakdown.reduce((sum, row) => sum + row.amount, 0);
+
+  const pieMonth = currentMonthKey();
+  const pieMonthRange = monthBoundsFromKey(pieMonth);
+  const { data: pieRows } = await supabase
+    .from("transactions")
+    .select("amount,category,date")
+    .eq("user_id", user.id)
+    .gte("date", pieMonthRange.start.toISOString())
+    .lt("date", pieMonthRange.end.toISOString())
+    .returns<SpendRecord[]>();
+
+  const pieBreakdownCurrentMonth = buildCategoryBreakdown(
+    pieRows ?? [],
+    pieMonthRange.start,
+    pieMonthRange.end,
+  );
+  const pieBreakdown = pieBreakdownCurrentMonth.length > 0 ? pieBreakdownCurrentMonth : breakdown;
 
   let focusedRecommendationRows: FocusedRecommendationRow[] = [];
   let focusedRecommendationError: string | null = null;
@@ -342,64 +408,374 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     }),
   );
 
+  const monthSpend = dashboardTransactionContext.reduce((sum, row) => sum + Number(row.amount), 0);
+  const monthBudgetLimitTotal = dashboardBudgetList.reduce(
+    (sum, row) => sum + Number(row.amount_limit),
+    0,
+  );
+  const budgetUtilizationRate = monthBudgetLimitTotal > 0
+    ? Math.round((monthSpend / monthBudgetLimitTotal) * 100)
+    : 0;
+  const projectedIncome = Math.max(monthSpend * 1.25, monthBudgetLimitTotal * 1.08, 12000);
+  const projectedSavings = Math.max(projectedIncome - monthSpend, 0);
+  const savingsProgressPct = projectedIncome > 0
+    ? Math.round((projectedSavings / projectedIncome) * 100)
+    : 0;
+
+  const weeklySpendMap = new Map<string, { day: string; amount: number }>();
+  const trendWindowEnd = chartWindowEnd;
+  const trendWindowStart = new Date(trendWindowEnd);
+  trendWindowStart.setUTCDate(trendWindowStart.getUTCDate() - 7);
+  for (let i = 0; i < 7; i += 1) {
+    const date = new Date(trendWindowStart);
+    date.setUTCDate(date.getUTCDate() + i);
+    const key = date.toISOString().slice(0, 10);
+    weeklySpendMap.set(key, {
+      day: date.toLocaleDateString("en-IN", { weekday: "short" }),
+      amount: 0,
+    });
+  }
+
+  chartRows.forEach((row) => {
+    const date = new Date(row.date);
+    if (date < trendWindowStart || date >= trendWindowEnd) {
+      return;
+    }
+    const key = date.toISOString().slice(0, 10);
+    const existing = weeklySpendMap.get(key);
+    if (!existing) {
+      return;
+    }
+    existing.amount += Number(row.amount);
+  });
+
+  const weeklyTrendData = Array.from(weeklySpendMap.values());
+
+  const quickAnalytics = [
+    {
+      label: "Budget health",
+      value: `${budgetUtilizationRate}% utilized`,
+      icon: CircleDollarSign,
+    },
+    {
+      label: "Savings progress",
+      value: `${savingsProgressPct}% this month`,
+      icon: Flag,
+    },
+    {
+      label: "AI coverage",
+      value: `${habitInsights.sampleSize} classified`,
+      icon: Brain,
+    },
+  ];
+
   return (
-    <main className="soft-fade-in relative mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-5 py-8 sm:px-8 sm:py-10">
+    <main className="finance-shell soft-fade-in relative mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-7 px-5 py-8 sm:px-8 sm:py-10 lg:gap-8">
       <DashboardStatusBanner />
 
-      <header className="glass-card flex flex-col gap-3 rounded-2xl p-6 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
-            Welcome to Zeph
-          </h1>
-          <p className="mt-2 text-sm text-slate-600">
-            Signed in as <span className="font-medium">{user.email}</span>
-          </p>
-        </div>
+      <header className="glass-card premium-hero rounded-2xl p-6 sm:p-7">
+        <div className="relative z-10 flex flex-col gap-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-200/90">
+                Financial intelligence platform
+              </p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-50 sm:text-4xl">
+                Welcome back to Zeph
+              </h1>
+              <p className="mt-2 text-sm text-slate-300">
+                {new Date().toLocaleDateString("en-IN", {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "long",
+                })}
+                {" \u2022 "}
+                {user.email}
+              </p>
+            </div>
+            <div className="inline-flex items-center gap-3 rounded-2xl border border-indigo-300/35 bg-slate-950/40 px-4 py-3">
+              <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-indigo-500 text-sm font-semibold text-white">
+                {(user.email ?? "U").slice(0, 1).toUpperCase()}
+              </div>
+              <div>
+                <p className="text-xs text-slate-300">Active profile</p>
+                <p className="text-sm font-semibold text-slate-100">Personal workspace</p>
+              </div>
+            </div>
+          </div>
 
-        <form action={signOut}>
-          <button
-            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            type="submit"
-          >
-            Sign out
-          </button>
-        </form>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
+              <p className="text-xs uppercase tracking-wide text-slate-300">Current balance target</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-50">
+                INR {projectedIncome.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              </p>
+            </article>
+            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
+              <p className="text-xs uppercase tracking-wide text-slate-300">Monthly spending</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-50">
+                INR {monthSpend.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              </p>
+            </article>
+            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
+              <p className="text-xs uppercase tracking-wide text-slate-300">Savings progress</p>
+              <p className="mt-2 text-2xl font-semibold text-emerald-300">{savingsProgressPct}%</p>
+            </article>
+            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
+              <p className="text-xs uppercase tracking-wide text-slate-300">Projected savings</p>
+              <p className="mt-2 text-2xl font-semibold text-cyan-300">
+                INR {projectedSavings.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              </p>
+            </article>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {quickAnalytics.map((chip) => {
+              const Icon = chip.icon;
+              return (
+                <span key={chip.label} className="premium-chip inline-flex items-center gap-2">
+                  <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+                  <span>{chip.label}</span>
+                  <span className="text-sky-200">{chip.value}</span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
       </header>
 
-      <section className="glass-card rounded-2xl p-6">
-        <h2 className="text-lg font-semibold text-slate-900">Auth foundation ready</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Story 1.2 baseline is active: secure registration, sign-in, OAuth entry point,
-          protected routing, and session-based access to this dashboard.
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
+        <h2 className="text-lg font-semibold text-slate-50">Quick actions</h2>
+        <p className="mt-2 text-sm text-slate-300">
+          Continue your workflow with high-signal controls and clean, focused navigation.
         </p>
 
-        <div className="mt-4 flex flex-wrap gap-4">
-          <Link className="font-medium text-teal-700 hover:text-teal-800" href="/transactions">
-            Open searchable transaction history
-          </Link>
-          <Link className="font-medium text-teal-700 hover:text-teal-800" href="/budgets">
-            Manage budgets
-          </Link>
-          <Link className="font-medium text-teal-700 hover:text-teal-800" href="/goals">
-            Manage goals
-          </Link>
+        <ol className="mt-5 grid gap-4 sm:grid-cols-3">
+          <li className="premium-action-card rounded-2xl p-5">
+            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-slate-300">Explore</p>
+            <Link className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 hover:text-cyan-100" href="/transactions">
+              <Wallet aria-hidden="true" className="h-4 w-4" />
+              Transaction history
+              <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
+            </Link>
+            <p className="mt-2 text-xs text-slate-300">Review and refine transaction quality with full search.</p>
+          </li>
+          <li className="premium-action-card rounded-2xl p-5">
+            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-slate-300">Optimize</p>
+            <Link className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-indigo-200 hover:text-indigo-100" href="/budgets">
+              <CircleDollarSign aria-hidden="true" className="h-4 w-4" />
+              Budget control center
+              <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
+            </Link>
+            <p className="mt-2 text-xs text-slate-300">Track utilization and detect risk before limits are breached.</p>
+          </li>
+          <li className="premium-action-card rounded-2xl p-5">
+            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-slate-300">Accelerate</p>
+            <Link className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-violet-200 hover:text-violet-100" href="/goals">
+              <Flag aria-hidden="true" className="h-4 w-4" />
+              Goals and milestones
+              <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
+            </Link>
+            <p className="mt-2 text-xs text-slate-300">Maintain momentum and convert intent into measurable savings.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-50">Dashboard intelligence</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              Live monthly spending, balance runway, utilization, and weekly trajectory.
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-2 rounded-full border border-indigo-300/35 bg-indigo-950/45 px-3 py-1 text-xs font-semibold text-indigo-100">
+            <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
+            AI-ready analytics
+          </span>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <article className="rounded-2xl border border-slate-700/60 bg-slate-950/35 p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-400">Income vs expenses</p>
+            <div className="mt-3 space-y-2">
+              <div>
+                <div className="mb-1 flex items-center justify-between text-xs text-slate-300">
+                  <span>Projected inflow</span>
+                  <span>INR {projectedIncome.toFixed(0)}</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                  <div className="h-2 rounded-full bg-gradient-to-r from-cyan-400 to-indigo-400" style={{ width: "100%" }} />
+                </div>
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between text-xs text-slate-300">
+                  <span>Expenses</span>
+                  <span>INR {monthSpend.toFixed(0)}</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className="h-2 rounded-full bg-gradient-to-r from-rose-400 to-orange-300"
+                    style={{ width: `${Math.min(Math.round((monthSpend / projectedIncome) * 100), 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article className="rounded-2xl border border-slate-700/60 bg-slate-950/35 p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-400">Budget utilization</p>
+            <p className="mt-2 text-2xl font-semibold text-slate-100">{budgetUtilizationRate}%</p>
+            <p className="mt-1 text-xs text-slate-300">
+              INR {monthSpend.toFixed(0)} spent of INR {monthBudgetLimitTotal.toFixed(0)} allocated
+            </p>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800">
+              <div
+                className="h-2 rounded-full bg-gradient-to-r from-violet-400 via-sky-400 to-cyan-300"
+                style={{ width: `${Math.min(budgetUtilizationRate, 100)}%` }}
+              />
+            </div>
+          </article>
+        </div>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-[1.05fr_1fr]">
+          <article className="rounded-2xl border border-slate-700/60 bg-slate-950/35 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs uppercase tracking-wide text-slate-400">Weekly expense trend</p>
+              <span className="text-xs text-slate-300">{chartWindowLabel}</span>
+            </div>
+            <WeeklyExpenseChart data={weeklyTrendData} />
+          </article>
+
+          <article className="rounded-2xl border border-slate-700/60 bg-slate-950/35 p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-400">Spending categories (current month)</p>
+            <SpendPieChart breakdown={pieBreakdown} wafflePalette={chartPalette} />
+          </article>
         </div>
       </section>
 
-      <section className="rounded-2xl border border-teal-200/70 bg-teal-50/55 p-6 shadow-sm shadow-teal-900/5">
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-teal-950">Overview spend waffle</h2>
-            <p className="mt-2 text-sm text-teal-900/80">
-              Tap any category in the legend to cross-filter recent transactions and history context.
+            <h2 className="text-lg font-semibold text-slate-50">Manual expense entry</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              Add an expense manually and it will appear in history, budget tracking, goal insights,
+              and AI review flows.
+            </p>
+          </div>
+        </div>
+
+        <form action={createManualExpense} className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <input name="returnTo" type="hidden" value="/dashboard" />
+
+          <label className="relative text-sm text-slate-200">
+            <span className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-slate-300">
+              <Wallet aria-hidden="true" className="h-3.5 w-3.5" /> Merchant
+            </span>
+            <input
+              className="w-full rounded-xl border border-indigo-300/30 bg-slate-950/35 px-3 py-2.5 text-sm"
+              maxLength={120}
+              minLength={2}
+              name="merchant"
+              placeholder="e.g. Metro Supermarket"
+              required
+            />
+          </label>
+
+          <label className="text-sm text-slate-200">
+            <span className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-slate-300">
+              <Bolt aria-hidden="true" className="h-3.5 w-3.5" /> Amount (INR)
+            </span>
+            <input
+              className="w-full rounded-xl border border-indigo-300/30 bg-slate-950/35 px-3 py-2.5 pl-7 text-sm"
+              min="0.01"
+              name="amount"
+              placeholder="0.00"
+              required
+              step="0.01"
+              type="number"
+            />
+            <span className="pointer-events-none absolute mt-[-2.05rem] ml-3 text-xs font-semibold text-slate-400">₹</span>
+          </label>
+
+          <label className="text-sm text-slate-200">
+            <span className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-slate-300">Source</span>
+            <select
+              className="w-full rounded-xl border border-indigo-300/30 bg-slate-950/35 px-3 py-2.5 text-sm"
+              defaultValue="card"
+              name="source"
+            >
+              <option value="upi">UPI</option>
+              <option value="card">Card</option>
+              <option value="wallet">Wallet</option>
+              <option value="bank">Bank</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </label>
+
+          <label className="text-sm text-slate-200">
+            <span className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-slate-300">Category</span>
+            <input
+              className="w-full rounded-xl border border-indigo-300/30 bg-slate-950/35 px-3 py-2.5 text-sm"
+              list="manual-category-suggestions"
+              maxLength={40}
+              name="category"
+              placeholder="Smart suggestion: Food"
+            />
+            <datalist id="manual-category-suggestions">
+              {suggestedCategories.map((category) => (
+                <option key={category} value={category} />
+              ))}
+            </datalist>
+          </label>
+
+          <label className="text-sm text-slate-200">
+            <span className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-slate-300">Reference</span>
+            <input
+              className="w-full rounded-xl border border-indigo-300/30 bg-slate-950/35 px-3 py-2.5 text-sm"
+              maxLength={80}
+              name="reference"
+              placeholder="Ref or note"
+            />
+          </label>
+
+          <label className="text-sm text-slate-200">
+            <span className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-slate-300">Date and time</span>
+            <input
+              className="w-full rounded-xl border border-indigo-300/30 bg-slate-950/35 px-3 py-2.5 text-sm"
+              defaultValue={new Date().toISOString().slice(0, 16)}
+              name="date"
+              required
+              type="datetime-local"
+            />
+          </label>
+
+          <div className="sm:col-span-2 lg:col-span-3">
+            <button
+              className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-900/35 transition hover:scale-[1.02] hover:shadow-cyan-900/35"
+              type="submit"
+            >
+              <Sparkles aria-hidden="true" className="h-4 w-4 transition group-hover:translate-x-0.5" />
+              Save manual expense
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-50">Overview spend by category</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              Click any slice or category in the legend to focus on that category and see transaction context.
             </p>
           </div>
           <div className="flex gap-2">
             <Link
               className={`rounded-md border px-3 py-1 text-xs font-medium ${
                 period === "this"
-                  ? "border-teal-700 bg-teal-700 text-white"
-                  : "border-teal-300 bg-white text-teal-800"
+                  ? "border-cyan-400/65 bg-cyan-500/25 text-cyan-100"
+                  : "border-slate-500/55 bg-slate-900/65 text-slate-300"
               }`}
               href={`/dashboard${queryString({ period: "this", categoryFocus })}`}
             >
@@ -408,8 +784,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <Link
               className={`rounded-md border px-3 py-1 text-xs font-medium ${
                 period === "last"
-                  ? "border-teal-700 bg-teal-700 text-white"
-                  : "border-teal-300 bg-white text-teal-800"
+                  ? "border-cyan-400/65 bg-cyan-500/25 text-cyan-100"
+                  : "border-slate-500/55 bg-slate-900/65 text-slate-300"
               }`}
               href={`/dashboard${queryString({ period: "last", categoryFocus })}`}
             >
@@ -419,35 +795,24 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         </div>
 
         {overviewError ? (
-          <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <p className="mt-4 rounded-md border border-rose-300/40 bg-rose-950/30 px-3 py-2 text-sm text-rose-100">
             Could not load overview chart data. Retry shortly.
           </p>
         ) : breakdown.length === 0 ? (
-          <p className="mt-4 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+          <p className="mt-4 rounded-md border border-slate-300/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-200">
             No spend data available for this period yet.
           </p>
         ) : (
           <>
-            <p className="mt-4 text-sm font-medium text-teal-900">
+            <p className="mt-4 text-sm font-medium text-cyan-200">
               Period total: INR {totalPeriodSpend.toFixed(2)}
             </p>
 
-            <div aria-label="Waffle chart" className="mt-3 grid grid-cols-8 gap-1 sm:grid-cols-10">
-              {waffleCells.map((cell, idx) => (
-                <div
-                  aria-label={cell.category}
-                  className={`h-5 w-full rounded ${wafflePalette[cell.category] ?? "bg-slate-300"}`}
-                  key={`${cell.category}-${idx}`}
-                  title={cell.category}
-                />
-              ))}
-            </div>
-
-            <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+            <ul className="mt-5 grid gap-3 sm:grid-cols-2">
               {breakdown.map((row) => (
                 <li key={row.category}>
                   <Link
-                    className="flex items-center justify-between rounded-md border border-teal-200 bg-white px-3 py-2 text-sm text-slate-800 transition hover:bg-teal-50"
+                    className="flex items-center justify-between rounded-md border border-indigo-300/30 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 transition hover:bg-indigo-950/35"
                     href={`/dashboard${queryString({ period, categoryFocus: row.category })}`}
                   >
                     <span className="inline-flex items-center gap-2">
@@ -462,7 +827,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               ))}
             </ul>
 
-            <div className="mt-3 flex flex-wrap gap-3 text-xs text-teal-900">
+            <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-300">
               {categoryFocus ? (
                 <>
                   <span>
@@ -489,63 +854,63 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             </div>
 
             {categoryFocus ? (
-              <div className="mt-4 rounded-lg border border-teal-200 bg-white p-4">
-                <h3 className="text-sm font-semibold text-teal-950">
+              <div className="mt-4 rounded-lg border border-indigo-300/35 bg-slate-950/25 p-4">
+                <h3 className="text-sm font-semibold text-slate-100">
                   Linked AI recommendation context
                 </h3>
 
                 {focusedRecommendationError ? (
-                  <p className="mt-2 text-sm text-red-700">
+                  <p className="mt-2 text-sm text-rose-200">
                     Could not load recommendation context right now.
                   </p>
                 ) : recommendationAction === "dismissed" ? (
                   <div className="mt-2 flex items-center justify-between gap-3">
-                    <p className="text-sm text-slate-500">Recommendation dismissed for this period.</p>
+                    <p className="text-sm text-slate-300/80">Recommendation dismissed for this period.</p>
                     <form action={saveRecommendationAction}>
                       <input type="hidden" name="category" value={categoryFocus.toLowerCase()} />
                       <input type="hidden" name="periodKey" value={periodKey} />
                       <input type="hidden" name="action" value="accepted" />
                       <button
                         type="submit"
-                        className="text-xs font-medium text-teal-700 underline hover:text-teal-900"
+                        className="text-xs font-medium text-cyan-200 underline hover:text-cyan-100"
                       >
                         Show again
                       </button>
                     </form>
                   </div>
                 ) : focusedRecommendationRows.length === 0 ? (
-                  <p className="mt-2 text-sm text-slate-700">
+                  <p className="mt-2 text-sm text-slate-200">
                     No transactions found for {categoryFocus} in this period yet.
                   </p>
                 ) : focusedClassifiedCount === 0 ? (
-                  <p className="mt-2 text-sm text-slate-700">
+                  <p className="mt-2 text-sm text-slate-200">
                     Transactions are present, but classification is still pending. Review labels to unlock smarter recommendations.
                   </p>
                 ) : (
                   <>
                     {recommendationAction === "accepted" ? (
-                      <p className="mt-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-800">
+                      <p className="mt-2 rounded-md border border-emerald-300/40 bg-emerald-950/30 px-3 py-2 text-xs font-medium text-emerald-100">
                         You&apos;ve acknowledged this recommendation for the current period.
                       </p>
                     ) : null}
-                    <p className="mt-2 text-sm text-slate-700">
+                    <p className="mt-2 text-sm text-slate-200">
                       In {categoryFocus}, {focusedUselessRows.length} of {focusedClassifiedCount} classified transactions were marked useless this period.
                     </p>
-                    <p className="mt-1 text-sm text-slate-700">
+                    <p className="mt-1 text-sm text-slate-200">
                       Useless spend estimate: INR {focusedUselessSpend.toFixed(2)}.
                       {focusedTopMerchant ? ` Highest repeat merchant: ${focusedTopMerchant}.` : ""}
                     </p>
-                    <p className="mt-2 rounded-md border border-teal-100 bg-teal-50 px-3 py-2 text-xs font-medium text-teal-900">
+                    <p className="mt-2 rounded-md border border-teal-300/35 bg-teal-950/30 px-3 py-2 text-xs font-medium text-teal-100">
                       Recommendation: Try setting a weekly cap at INR {Math.max(0, focusedUselessSpend * 0.75).toFixed(0)} for {categoryFocus.toLowerCase()} to reduce wasteful spend without over-correcting.
                     </p>
                     {focusedTopReason ? (
-                      <p className="mt-2 text-xs text-slate-600">
+                      <p className="mt-2 text-xs text-slate-300/85">
                         Example rationale from recent AI reviews: {focusedTopReason}
                       </p>
                     ) : null}
                     <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
                       <Link
-                        className="font-medium text-teal-800 underline"
+                        className="font-medium text-cyan-200 underline"
                         href={`/transactions?category=${encodeURIComponent(categoryFocus)}&from=${overviewStart
                           .toISOString()
                           .slice(0, 10)}&to=${overviewEnd.toISOString().slice(0, 10)}`}
@@ -553,7 +918,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                         Inspect filtered transactions
                       </Link>
                       <Link
-                        className="font-medium text-teal-800 underline"
+                        className="font-medium text-cyan-200 underline"
                         href="/transactions"
                       >
                         Review all classifications
@@ -565,7 +930,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                           <input type="hidden" name="action" value="accepted" />
                           <button
                             type="submit"
-                            className="font-medium text-green-700 underline hover:text-green-900"
+                            className="font-medium text-emerald-200 underline hover:text-emerald-100"
                           >
                             Accept
                           </button>
@@ -577,7 +942,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                         <input type="hidden" name="action" value="dismissed" />
                         <button
                           type="submit"
-                          className="font-medium text-slate-500 underline hover:text-slate-700"
+                          className="font-medium text-slate-300 underline hover:text-slate-100"
                         >
                           {recommendationAction === "accepted" ? "Dismiss" : "Dismiss"}
                         </button>
@@ -591,39 +956,39 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         )}
       </section>
 
-      <section className="glass-card rounded-2xl p-6">
-        <h2 className="text-lg font-semibold text-slate-900">
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
+        <h2 className="text-lg font-semibold text-slate-100">
           Payment message consent
         </h2>
-        <p className="mt-2 text-sm text-slate-600">
+        <p className="mt-2 text-sm text-slate-300">
           Status: {consent?.granted ? "Enabled" : "Disabled"}
         </p>
 
         <div className="mt-4 flex flex-col gap-2 text-sm sm:flex-row sm:gap-4">
-          <Link className="font-medium text-teal-700 hover:text-teal-800" href="/onboarding/consent">
+          <Link className="font-medium text-cyan-200 hover:text-cyan-100" href="/onboarding/consent">
             Open onboarding consent step
           </Link>
-          <Link className="font-medium text-teal-700 hover:text-teal-800" href="/settings/privacy">
+          <Link className="font-medium text-cyan-200 hover:text-cyan-100" href="/settings/privacy">
             Manage in privacy settings
           </Link>
         </div>
       </section>
 
       {/* Budget utilization snapshot */}
-      <section className="glass-card rounded-2xl p-6">
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-slate-900">
+          <h2 className="text-base font-semibold text-slate-100">
             Budget utilization — {dashboardMonth}
           </h2>
-          <Link className="text-xs font-medium text-teal-700 hover:text-teal-900" href="/budgets">
+          <Link className="text-xs font-medium text-cyan-200 hover:text-cyan-100" href="/budgets">
             Manage budgets →
           </Link>
         </div>
 
         {dashboardBudgetList.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">
+          <p className="mt-3 text-sm text-slate-300">
             No budgets set for this month.{" "}
-            <Link className="font-medium text-teal-700 underline hover:text-teal-900" href="/budgets">
+            <Link className="font-medium text-cyan-200 underline hover:text-cyan-100" href="/budgets">
               Add your first budget
             </Link>{" "}
             to start tracking spend limits.
@@ -634,7 +999,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               <ul className="mt-4 space-y-2">
                 {dashboardAlerts.map((alert) => (
                   <li
-                    className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900"
+                    className="rounded-md border border-rose-300/40 bg-rose-950/28 px-3 py-2 text-sm text-rose-100"
                     key={alert.id}
                   >
                     <p>{alert.message}</p>
@@ -643,8 +1008,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                       if (!guidance) return null;
 
                       return (
-                        <details className="mt-2 rounded-md border border-rose-100 bg-white/70 px-2 py-1.5 text-xs text-slate-700">
-                          <summary className="cursor-pointer font-medium text-rose-900">
+                        <details className="mt-2 rounded-md border border-rose-300/35 bg-slate-950/35 px-2 py-1.5 text-xs text-slate-200">
+                          <summary className="cursor-pointer font-medium text-rose-100">
                             View details and actions
                           </summary>
                           <p className="mt-1">
@@ -676,25 +1041,25 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 return (
                   <div key={u.budget.id} className="flex flex-col gap-1">
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium capitalize text-slate-900">{u.budget.category}</span>
-                      <span className={u.isOver ? "font-semibold text-red-700" : u.isNearLimit ? "font-semibold text-amber-700" : "text-slate-600"}>
+                      <span className="font-medium capitalize text-slate-100">{u.budget.category}</span>
+                      <span className={u.isOver ? "font-semibold text-rose-200" : u.isNearLimit ? "font-semibold text-amber-200" : "text-slate-200"}>
                         {u.pct}%
                       </span>
                     </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800/70">
                       <div
                         className={`h-2 rounded-full ${barColor}`}
                         style={{ width: `${Math.min(u.pct, 100)}%` }}
                       />
                     </div>
-                    <div className="flex items-center justify-between text-xs text-slate-500">
+                    <div className="flex items-center justify-between text-xs text-slate-300/85">
                       <span>INR {u.spent.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} spent</span>
                       <span>of INR {Number(u.budget.amount_limit).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     </div>
                     {u.isOver ? (
-                      <p className="text-xs font-medium text-red-700">Over budget</p>
+                      <p className="text-xs font-medium text-rose-200">Over budget</p>
                     ) : u.isNearLimit ? (
-                      <p className="text-xs font-medium text-amber-700">Approaching limit</p>
+                      <p className="text-xs font-medium text-amber-200">Approaching limit</p>
                     ) : null}
                   </div>
                 );
@@ -704,23 +1069,23 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         )}
       </section>
 
-      <section className="rounded-2xl border border-emerald-200/75 bg-emerald-50/55 p-6 shadow-sm shadow-emerald-900/5">
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-emerald-950">Savings goals snapshot</h2>
-          <Link className="text-xs font-medium text-emerald-800 hover:text-emerald-900" href="/goals">
+          <h2 className="text-base font-semibold text-emerald-100">Savings goals snapshot</h2>
+          <Link className="text-xs font-medium text-cyan-200 hover:text-cyan-100" href="/goals">
             Open goals →
           </Link>
         </div>
 
         {dashboardGoalProgress.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-600">No savings goals yet. Add one to track progress.</p>
+          <p className="mt-3 text-sm text-slate-300">No savings goals yet. Add one to track progress.</p>
         ) : (
           <>
             {dashboardMilestones.length > 0 ? (
               <ul className="mt-3 space-y-2">
                 {dashboardMilestones.map((row) => (
                   <li
-                    className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm text-emerald-900"
+                    className="rounded-md border border-emerald-300/35 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-100"
                     key={row.id}
                   >
                     {row.message}
@@ -730,28 +1095,28 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             ) : null}
 
             <div className="mt-3 grid gap-2 sm:grid-cols-4">
-              <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-xs text-slate-700">
-                Total: <span className="font-semibold text-slate-900">{dashboardGoalSummary.totalGoals}</span>
+              <div className="rounded-md border border-emerald-300/35 bg-slate-950/30 px-3 py-2 text-xs text-slate-200">
+                Total: <span className="font-semibold text-slate-100">{dashboardGoalSummary.totalGoals}</span>
               </div>
-              <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-xs text-slate-700">
-                Completed: <span className="font-semibold text-slate-900">{dashboardGoalSummary.completedGoals}</span>
+              <div className="rounded-md border border-emerald-300/35 bg-slate-950/30 px-3 py-2 text-xs text-slate-200">
+                Completed: <span className="font-semibold text-slate-100">{dashboardGoalSummary.completedGoals}</span>
               </div>
-              <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-xs text-slate-700">
-                Avg progress: <span className="font-semibold text-slate-900">{dashboardGoalSummary.avgProgress}%</span>
+              <div className="rounded-md border border-emerald-300/35 bg-slate-950/30 px-3 py-2 text-xs text-slate-200">
+                Avg progress: <span className="font-semibold text-slate-100">{dashboardGoalSummary.avgProgress}%</span>
               </div>
-              <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-xs text-slate-700">
-                Due soon: <span className="font-semibold text-slate-900">{dashboardGoalSummary.dueSoonCount}</span>
+              <div className="rounded-md border border-emerald-300/35 bg-slate-950/30 px-3 py-2 text-xs text-slate-200">
+                Due soon: <span className="font-semibold text-slate-100">{dashboardGoalSummary.dueSoonCount}</span>
               </div>
             </div>
 
             <ul className="mt-3 space-y-2">
               {dashboardGoalProgress.slice(0, 3).map((row) => (
-                <li key={row.goal.id} className="rounded-md border border-emerald-200 bg-white px-3 py-2">
+                <li key={row.goal.id} className="rounded-md border border-emerald-300/35 bg-slate-950/30 px-3 py-2">
                   <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium text-slate-900">{row.goal.name}</span>
-                    <span className="text-slate-600">{row.percent}%</span>
+                    <span className="font-medium text-slate-100">{row.goal.name}</span>
+                    <span className="text-slate-300/85">{row.percent}%</span>
                   </div>
-                  <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-800/70">
                     <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${row.percent}%` }} />
                   </div>
                 </li>
@@ -761,35 +1126,35 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         )}
       </section>
 
-      <section className="rounded-2xl border border-indigo-200/75 bg-indigo-50/55 p-6 shadow-sm shadow-indigo-900/5">
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-indigo-950">
+            <h2 className="text-lg font-semibold text-indigo-100">
               Habit trend insights</h2>
-            <p className="mt-2 text-sm text-indigo-900/80">
+            <p className="mt-2 text-sm text-indigo-200/90">
               Personalized from your own classified history ({habitInsights.periodLabel}).
             </p>
           </div>
-          <span className="rounded-full bg-indigo-200/70 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-950">
+          <span className="rounded-full border border-indigo-300/35 bg-indigo-950/35 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-100">
             {habitInsights.sampleSize} classified
           </span>
         </div>
 
         {insightError ? (
-          <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <p className="mt-4 rounded-md border border-rose-300/40 bg-rose-950/30 px-3 py-2 text-sm text-rose-100">
             Could not generate trend insights right now. Retry shortly.
           </p>
         ) : !habitInsights.isSufficientHistory ? (
-          <p className="mt-4 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+          <p className="mt-4 rounded-md border border-slate-300/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-200">
             More classified transactions are needed before trend insights can be generated. Keep reviewing AI labels to build reliable summaries.
           </p>
         ) : (
           <ul className="mt-4 space-y-3">
             {habitInsights.insights.map((insight) => (
-              <li className="rounded-lg border border-indigo-200 bg-white p-4" key={insight.id}>
-                <h3 className="text-sm font-semibold text-slate-900">{insight.title}</h3>
-                <p className="mt-1 text-sm text-slate-700">{insight.text}</p>
-                <p className="mt-2 rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-medium text-indigo-900">
+              <li className="rounded-lg border border-indigo-300/35 bg-slate-950/30 p-4" key={insight.id}>
+                <h3 className="text-sm font-semibold text-slate-100">{insight.title}</h3>
+                <p className="mt-1 text-sm text-slate-200">{insight.text}</p>
+                <p className="mt-2 rounded-md border border-indigo-300/35 bg-indigo-950/30 px-3 py-2 text-xs font-medium text-indigo-100">
                   Action: {insight.impact}
                 </p>
               </li>
@@ -798,51 +1163,51 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         )}
       </section>
 
-      <section className="rounded-2xl border border-amber-200/80 bg-amber-50/70 p-6 shadow-sm shadow-amber-900/5">
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-amber-950">
+            <h2 className="text-lg font-semibold text-amber-100">
               Uncategorized transaction queue
             </h2>
-            <p className="mt-2 text-sm text-amber-900/80">
+            <p className="mt-2 text-sm text-amber-200/90">
               Categorize new transactions so reports and spending insights stay accurate.
             </p>
           </div>
-          <span className="rounded-full bg-amber-200/70 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-950">
+          <span className="rounded-full border border-amber-300/35 bg-amber-950/35 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-100">
             {uncategorizedTransactions.length} pending
           </span>
         </div>
 
         {queueError ? (
-          <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <p className="mt-4 rounded-md border border-rose-300/40 bg-rose-950/30 px-3 py-2 text-sm text-rose-100">
             Could not load uncategorized transactions yet. Try again shortly.
           </p>
         ) : uncategorizedTransactions.length === 0 ? (
-          <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          <p className="mt-4 rounded-md border border-emerald-300/40 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-100">
             All caught up. No uncategorized transactions right now.
           </p>
         ) : (
           <ul className="mt-5 space-y-3">
             {uncategorizedTransactions.map((transaction) => (
               <li
-                className="rounded-lg border border-amber-200 bg-white p-4"
+                className="rounded-lg border border-amber-300/35 bg-slate-950/30 p-4"
                 key={transaction.id}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-slate-900">
+                  <p className="text-sm font-semibold text-slate-100">
                     {transaction.merchant}
                   </p>
-                  <p className="text-sm font-semibold text-slate-950">
+                  <p className="text-sm font-semibold text-slate-100">
                     INR {transaction.amount.toFixed(2)}
                   </p>
                 </div>
 
-                <p className="mt-1 text-xs text-slate-600">
+                <p className="mt-1 text-xs text-slate-300/85">
                   {new Date(transaction.date).toLocaleString()} • {transaction.source.toUpperCase()}
                   {transaction.reference ? ` • Ref ${transaction.reference}` : ""}
                 </p>
 
-                <p className="mt-1 text-xs text-slate-600">
+                <p className="mt-1 text-xs text-slate-300/85">
                   AI: {transaction.ai_classification ?? "pending"}
                   {transaction.ai_reason ? ` • ${transaction.ai_reason}` : ""} • state=
                   {transaction.ai_review_state}
@@ -854,7 +1219,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                     Category
                   </label>
                   <input
-                    className="min-w-44 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    className="min-w-44 flex-1 rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400"
                     id={`category-${transaction.id}`}
                     list={`category-suggestions-${transaction.id}`}
                     maxLength={40}
@@ -869,7 +1234,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                     ))}
                   </datalist>
                   <button
-                    className="rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-amber-700"
+                    className="rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-amber-700"
                     type="submit"
                   >
                     Save category
@@ -884,10 +1249,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       <section className="glass-card rounded-2xl p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">
+            <h2 className="text-lg font-semibold text-slate-100">
               Transaction edits and bulk actions
             </h2>
-            <p className="mt-2 text-sm text-slate-600">
+            <p className="mt-2 text-sm text-slate-300">
               Select one or more rows for bulk categorization, or edit transaction details inline.
               {categoryFocus
                 ? ` Showing only ${categoryFocus} rows due to category focus.`
@@ -898,7 +1263,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
         <form action={bulkAssignTransactionCategory} className="mt-4 flex flex-wrap items-center gap-2" id="bulk-category-form">
           <input
-            className="min-w-44 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className="min-w-44 flex-1 rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400"
             list="bulk-category-suggestions"
             maxLength={40}
             minLength={2}
@@ -912,7 +1277,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             ))}
           </datalist>
           <button
-            className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+            className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
             type="submit"
           >
             Apply to selected
@@ -920,21 +1285,21 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         </form>
 
         {recentError ? (
-          <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <p className="mt-4 rounded-md border border-rose-300/40 bg-rose-950/30 px-3 py-2 text-sm text-rose-100">
             Could not load recent transactions for editing. Retry shortly.
           </p>
         ) : transactionRows.length === 0 ? (
-          <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          <p className="mt-4 rounded-md border border-slate-300/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-200">
             No transactions captured yet.
           </p>
         ) : (
           <ul className="mt-4 space-y-3">
             {transactionRows.map((transaction) => (
-              <li className="rounded-lg border border-slate-200 bg-slate-50/40 p-4" key={transaction.id}>
+              <li className="rounded-lg border border-slate-300/30 bg-slate-950/30 p-4" key={transaction.id}>
                 <div className="flex items-center justify-between gap-3">
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-200">
                     <input
-                      className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+                      className="h-4 w-4 rounded border-slate-400/60 text-cyan-300 focus:ring-cyan-500"
                       form="bulk-category-form"
                       name="transactionIds"
                       type="checkbox"
@@ -942,14 +1307,14 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                     />
                     Select
                   </label>
-                  <p className="text-xs text-slate-600">ID: {transaction.id.slice(0, 8)}</p>
+                  <p className="text-xs text-slate-300/85">ID: {transaction.id.slice(0, 8)}</p>
                 </div>
 
                 <form action={editTransactionDetails} className="mt-3 grid gap-2 sm:grid-cols-2">
                   <input name="transactionId" type="hidden" value={transaction.id} />
 
                   <input
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    className="rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400"
                     defaultValue={transaction.merchant}
                     maxLength={120}
                     minLength={2}
@@ -959,7 +1324,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   />
 
                   <input
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    className="rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400"
                     defaultValue={transaction.amount.toFixed(2)}
                     min="0.01"
                     name="amount"
@@ -970,7 +1335,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   />
 
                   <select
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    className="rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100"
                     defaultValue={transaction.source}
                     name="source"
                   >
@@ -982,7 +1347,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   </select>
 
                   <input
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    className="rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400"
                     defaultValue={transaction.reference ?? ""}
                     maxLength={80}
                     name="reference"
@@ -990,7 +1355,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   />
 
                   <input
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    className="rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100"
                     defaultValue={new Date(transaction.date).toISOString().slice(0, 16)}
                     name="date"
                     required
@@ -998,7 +1363,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   />
 
                   <input
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    className="rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400"
                     defaultValue={transaction.category ?? ""}
                     list={`edit-category-suggestions-${transaction.id}`}
                     maxLength={40}
@@ -1024,7 +1389,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 <form action={assignTransactionCategory} className="mt-3 flex flex-wrap items-center gap-2">
                   <input name="transactionId" type="hidden" value={transaction.id} />
                   <input
-                    className="min-w-44 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    className="min-w-44 flex-1 rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400"
                     list={`quick-category-suggestions-${transaction.id}`}
                     maxLength={40}
                     minLength={2}
@@ -1038,7 +1403,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                     ))}
                   </datalist>
                   <button
-                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                    className="rounded-md border border-slate-300/40 bg-slate-900/70 px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-slate-800"
                     type="submit"
                   >
                     Quick category save
@@ -1049,6 +1414,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </ul>
         )}
       </section>
+
+      <MobileFinanceNav active="/dashboard" />
     </main>
   );
 }

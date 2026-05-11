@@ -5,7 +5,6 @@ import {
   isGoalArchived,
   isGoalCompleted,
   isGoalPastDeadline,
-  type GoalHistoryFilter,
 } from "@/lib/goals/history";
 import { computeGoalProgress } from "@/lib/goals/progress";
 import type { Goal } from "@/lib/goals/goal-helpers";

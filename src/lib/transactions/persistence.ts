@@ -1,16 +1,32 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ParsedTransaction } from "@/lib/ingestion/payment-message";
+import { runIngestionPipeline } from "@/shared/ingestion/index";
+
+export type PersistableParsedTransaction = {
+  amount: number;
+  merchant: string;
+  source: string;
+  source_version?: string;
+  reference: string | null;
+  timestamp: string;
+  category?: string | null;
+  financial_document_id?: string | null;
+  ingestion_batch_id?: string;
+  ingested_at?: string;
+  fingerprint?: string;
+};
 
 type PersistInput = {
   userId: string;
   ingestionId: string;
-  parsed: ParsedTransaction;
+  parsed: PersistableParsedTransaction;
 };
 
 type PersistedTransaction = {
   id: string;
   userId: string;
   ingestionId: string;
+  ingestionBatchId: string;
+  fingerprint: string;
   amount: number;
   merchant: string;
   source: string;
@@ -44,6 +60,8 @@ function toPersistedTransaction(row: TransactionRow): PersistedTransaction {
     id: row.id,
     userId: row.user_id,
     ingestionId: row.ingestion_id,
+    ingestionBatchId: "",
+    fingerprint: "",
     amount: row.amount,
     merchant: row.merchant,
     source: row.source,
@@ -54,7 +72,7 @@ function toPersistedTransaction(row: TransactionRow): PersistedTransaction {
   };
 }
 
-function validateParsedTransaction(parsed: ParsedTransaction): PersistResult | null {
+function validateParsedTransaction(parsed: PersistableParsedTransaction): PersistResult | null {
   if (!Number.isFinite(parsed.amount) || parsed.amount <= 0) {
     return {
       ok: false,
@@ -90,7 +108,36 @@ export async function persistTransaction(
   supabase: SupabaseClient,
   input: PersistInput,
 ): Promise<PersistResult> {
-  const validationError = validateParsedTransaction(input.parsed);
+  const canonical = runIngestionPipeline(
+    {
+      merchant: input.parsed.merchant,
+      amount: input.parsed.amount,
+      date: input.parsed.timestamp,
+      reference: input.parsed.reference,
+      ingestion_batch_id: input.parsed.ingestion_batch_id,
+      ingested_at: input.parsed.ingested_at,
+    },
+    {
+      source_type: input.parsed.source,
+      source_version: input.parsed.source_version ?? "1.0.0",
+      ingestion_batch_id: input.parsed.ingestion_batch_id,
+      ingested_at: input.parsed.ingested_at,
+    },
+  );
+
+  const canonicalParsed: PersistableParsedTransaction = {
+    amount: canonical.normalized.amount,
+    merchant: canonical.normalized.merchant,
+    source: canonical.normalized.source_type,
+    source_version: canonical.normalized.source_version,
+    reference: canonical.normalized.reference,
+    timestamp: input.parsed.timestamp,
+    ingestion_batch_id: canonical.normalized.ingestion_batch_id,
+    ingested_at: canonical.normalized.ingested_at,
+    fingerprint: canonical.normalized.fingerprint,
+  };
+
+  const validationError = validateParsedTransaction(canonicalParsed);
   if (validationError) {
     return validationError;
   }
@@ -99,13 +146,19 @@ export async function persistTransaction(
   const rowToSave = {
     user_id: input.userId,
     ingestion_id: input.ingestionId,
-    amount: input.parsed.amount,
-    merchant: input.parsed.merchant.trim(),
-    source: input.parsed.source,
-    reference: input.parsed.reference,
-    date: input.parsed.timestamp,
+    ingestion_batch_id: canonicalParsed.ingestion_batch_id,
+    ingestion_fingerprint: canonicalParsed.fingerprint,
+    amount: canonicalParsed.amount,
+    merchant: canonicalParsed.merchant.trim(),
+    source: canonicalParsed.source,
+    reference: canonicalParsed.reference,
+    category: input.parsed.category ?? null,
+    date: canonicalParsed.timestamp,
     created_at: nowIso,
     updated_at: nowIso,
+    ...(input.parsed.financial_document_id != null
+      ? { financial_document_id: input.parsed.financial_document_id }
+      : {}),
   };
 
   const { data, error } = await supabase
@@ -128,7 +181,11 @@ export async function persistTransaction(
       if (!existingError && existingRow) {
         return {
           ok: true,
-          transaction: toPersistedTransaction(existingRow),
+          transaction: {
+            ...toPersistedTransaction(existingRow),
+            ingestionBatchId: canonicalParsed.ingestion_batch_id ?? "",
+            fingerprint: canonicalParsed.fingerprint ?? "",
+          },
           deduplicated: true,
         };
       }
@@ -151,5 +208,13 @@ export async function persistTransaction(
     };
   }
 
-  return { ok: true, transaction: toPersistedTransaction(data), deduplicated: false };
+  return {
+    ok: true,
+    transaction: {
+      ...toPersistedTransaction(data),
+      ingestionBatchId: canonicalParsed.ingestion_batch_id ?? "",
+      fingerprint: canonicalParsed.fingerprint ?? "",
+    },
+    deduplicated: false,
+  };
 }

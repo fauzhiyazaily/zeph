@@ -5,7 +5,7 @@ import {
   saveBudgetAlertPreferences,
   upsertBudget,
 } from "@/app/budgets/actions";
-import { MobileFinanceNav } from "@/app/components/mobile-finance-nav";
+import { AppShell } from "@/app/components/app-shell";
 import {
   evaluateBudgetAlerts,
   getOrCreateBudgetAlertPreference,
@@ -114,7 +114,8 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
   const editBudget = editId ? budgetList.find((b) => b.id === editId) ?? null : null;
 
   return (
-    <main className="finance-shell mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-5 py-8 sm:px-6 sm:py-10">
+    <AppShell active="/budgets">
+    <main className="app-content mx-auto w-full max-w-[1600px] flex flex-col gap-6 px-4 py-5 lg:px-6 lg:py-6">
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Budget Planning</h1>
@@ -455,7 +456,7 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
         )}
       </section>
 
-      <MobileFinanceNav active="/budgets" />
     </main>
+    </AppShell>
   );
 }

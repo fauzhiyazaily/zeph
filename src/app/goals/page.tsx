@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { MobileFinanceNav } from "@/app/components/mobile-finance-nav";
+import { AppShell } from "@/app/components/app-shell";
 import { deleteGoal, saveGoal } from "@/app/goals/actions";
 import { type Goal } from "@/lib/goals/goal-helpers";
 import {
@@ -62,7 +62,8 @@ export default async function GoalsPage({ searchParams }: GoalsPageProps) {
   const goalNameById = new Map(goalList.map((goal) => [goal.id, goal.name]));
 
   return (
-    <main className="finance-shell mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-5 py-8 sm:px-6 sm:py-10">
+    <AppShell active="/goals">
+    <main className="app-content mx-auto w-full max-w-[1600px] flex flex-col gap-6 px-4 py-5 lg:px-6 lg:py-6">
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Savings Goals</h1>
@@ -376,7 +377,7 @@ export default async function GoalsPage({ searchParams }: GoalsPageProps) {
         )}
       </section>
 
-      <MobileFinanceNav active="/goals" />
     </main>
+    </AppShell>
   );
 }

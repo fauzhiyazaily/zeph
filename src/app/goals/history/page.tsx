@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { archiveGoal, unarchiveGoal } from "@/app/goals/actions";
+import { AppShell } from "@/app/components/app-shell";
 import { type Goal } from "@/lib/goals/goal-helpers";
 import {
   buildGoalHistoryRows,
@@ -108,7 +109,8 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
   };
 
   return (
-    <main className="finance-shell soft-fade-in relative mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-5 py-8 sm:px-8 sm:py-10">
+    <AppShell active="/goals">
+    <main className="app-content soft-fade-in relative mx-auto w-full max-w-[1600px] flex flex-col gap-6 px-4 py-5 lg:px-6 lg:py-6">
       <header className="glass-card rounded-2xl p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -316,6 +318,8 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
           </>
         )}
       </section>
+
     </main>
+    </AppShell>
   );
 }

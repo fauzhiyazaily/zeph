@@ -4,10 +4,12 @@ import {
   assignTransactionCategory,
   bulkAssignTransactionCategory,
   createManualExpense,
+  deleteFinancialDocument,
   editTransactionDetails,
   saveRecommendationAction,
 } from "@/app/dashboard/actions";
-import { MobileFinanceNav } from "@/app/components/mobile-finance-nav";
+import { BankStatementUpload } from "@/app/dashboard/bank-statement-upload";
+import { AppShell } from "@/app/components/app-shell";
 import { SpendPieChart } from "@/app/dashboard/spend-pie-chart";
 import { DashboardStatusBanner } from "@/app/dashboard/status-banner";
 import { WeeklyExpenseChart } from "@/app/dashboard/weekly-expense-chart";
@@ -39,6 +41,7 @@ import {
   type GoalMilestoneRow,
 } from "@/lib/goals/milestones";
 import { computeGoalProgress, summarizeGoalProgress } from "@/lib/goals/progress";
+import type { BankStatementAnalysis } from "@/lib/ingestion/bank-statement-types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { ArrowUpRight, Bolt, Brain, CircleDollarSign, Flag, Sparkles, Wallet } from "lucide-react";
 
@@ -81,6 +84,27 @@ type FocusedRecommendationRow = {
   ai_reason: string | null;
 };
 
+type FinancialDocumentDashboardRow = {
+  id: string;
+  file_name: string;
+  parse_status: "processing" | "completed" | "failed";
+  parse_error: string | null;
+  bank_name: string | null;
+  account_holder_name: string | null;
+  account_number_masked: string | null;
+  statement_period_start: string | null;
+  statement_period_end: string | null;
+  transaction_count: number;
+  imported_debit_count: number;
+  total_credits: number;
+  total_debits: number;
+  opening_balance: number | null;
+  closing_balance: number | null;
+  processed_at: string | null;
+  created_at: string;
+  extracted_summary: BankStatementAnalysis | null;
+};
+
 const suggestedCategories = [
   "Food",
   "Transport",
@@ -121,6 +145,8 @@ type DashboardPageProps = {
   searchParams: Promise<{
     period?: string;
     categoryFocus?: string;
+    message?: string;
+    error?: string;
   }>;
 };
 
@@ -136,6 +162,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const params = await searchParams;
   const period = params.period === "last" ? "last" : "this";
   const categoryFocus = (params.categoryFocus ?? "").trim();
+  const feedbackMessage = (params.message ?? "").trim();
+  const feedbackError = (params.error ?? "").trim();
 
   const supabase = await createServerSupabaseClient();
   const {
@@ -147,6 +175,16 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   }
 
   const consent = getMessageReadingConsent(user);
+  const { data: financialDocuments, error: financialDocumentsError } = await supabase
+    .from("financial_documents")
+    .select(
+      "id,file_name,parse_status,parse_error,bank_name,account_holder_name,account_number_masked,statement_period_start,statement_period_end,transaction_count,imported_debit_count,total_credits,total_debits,opening_balance,closing_balance,processed_at,created_at,extracted_summary",
+    )
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(3)
+    .returns<FinancialDocumentDashboardRow[]>();
+
   const { data: uncategorized, error: queueError } = await supabase
     .from("transactions")
     .select(
@@ -470,8 +508,20 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   ];
 
   return (
-    <main className="finance-shell soft-fade-in relative mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-7 px-5 py-8 sm:px-8 sm:py-10 lg:gap-8">
+    <AppShell active="/dashboard">
+    <main className="app-content soft-fade-in relative mx-auto w-full max-w-[1600px] flex flex-col gap-7 px-4 py-5 lg:px-6 lg:py-6">
       <DashboardStatusBanner />
+
+      {feedbackMessage ? (
+        <p className="rounded-xl border border-emerald-300/40 bg-emerald-950/35 px-4 py-3 text-sm text-emerald-100">
+          {feedbackMessage}
+        </p>
+      ) : null}
+      {feedbackError ? (
+        <p className="rounded-xl border border-rose-300/40 bg-rose-950/35 px-4 py-3 text-sm text-rose-100">
+          {feedbackError}
+        </p>
+      ) : null}
 
       <header className="glass-card premium-hero rounded-2xl p-6 sm:p-7">
         <div className="relative z-10 flex flex-col gap-6">
@@ -581,6 +631,189 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         </ol>
       </section>
 
+      <BankStatementUpload />
+
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-50">Imported statement intelligence</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              Recent uploaded statements feed debit transactions into Zeph while preserving full credit, balance, and recurring-payment context in a separate secure document layer.
+            </p>
+          </div>
+          <Link
+            className="text-sm font-medium text-cyan-200 hover:text-cyan-100"
+            href="/transactions?source=bank"
+          >
+            Open bank-linked transactions
+          </Link>
+        </div>
+
+        {financialDocumentsError ? (
+          <p className="mt-4 rounded-md border border-rose-300/40 bg-rose-950/30 px-3 py-2 text-sm text-rose-100">
+            Could not load uploaded statement summaries right now.
+          </p>
+        ) : (financialDocuments?.length ?? 0) === 0 ? (
+          <p className="mt-4 rounded-md border border-slate-300/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-200">
+            No bank statements uploaded yet. Upload one to unlock document-driven income, balance, and recurring payment insights.
+          </p>
+        ) : (
+          <div className="mt-5 space-y-4">
+            {(financialDocuments ?? []).map((document) => {
+              const analysis = document.extracted_summary;
+              const savingsRateLabel = analysis?.savingsRate === null || analysis?.savingsRate === undefined
+                ? "N/A"
+                : `${analysis.savingsRate}%`;
+
+              return (
+                <article
+                  className="rounded-[1.6rem] border border-slate-300/30 bg-slate-950/28 p-5 shadow-[0_22px_42px_-30px_rgba(15,23,42,0.9)]"
+                  key={document.id}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-cyan-300/35 bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-100">
+                          {document.parse_status}
+                        </span>
+                        {document.bank_name ? (
+                          <span className="text-xs font-medium text-slate-300">{document.bank_name}</span>
+                        ) : null}
+                      </div>
+                      <h3 className="mt-3 text-base font-semibold text-slate-100">{document.file_name}</h3>
+                      <p className="mt-2 text-sm text-slate-300">
+                        {document.account_holder_name ?? "Account holder not detected"}
+                        {document.account_number_masked ? ` • ${document.account_number_masked}` : ""}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {document.statement_period_start
+                          ? `${new Date(document.statement_period_start).toLocaleDateString("en-IN")} to ${new Date(document.statement_period_end ?? document.statement_period_start).toLocaleDateString("en-IN")}`
+                          : `Uploaded ${new Date(document.created_at).toLocaleString("en-IN")}`}
+                      </p>
+                    </div>
+
+                    <form action={deleteFinancialDocument}>
+                      <input type="hidden" name="documentId" value={document.id} />
+                      <input type="hidden" name="returnTo" value="/dashboard" />
+                      <button
+                        className="rounded-xl border border-rose-300/35 bg-rose-950/20 px-3 py-2 text-xs font-semibold text-rose-100 transition hover:bg-rose-950/35"
+                        type="submit"
+                      >
+                        Delete statement
+                      </button>
+                    </form>
+                    <Link
+                      className="rounded-xl border border-cyan-300/35 bg-cyan-950/20 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-950/35"
+                      href={`/statements/${document.id}`}
+                    >
+                      Open details
+                    </Link>
+                  </div>
+
+                  {document.parse_status === "failed" ? (
+                    <p className="mt-4 rounded-xl border border-rose-300/40 bg-rose-950/25 px-3 py-2 text-sm text-rose-100">
+                      {document.parse_error ?? "Statement parsing failed."}
+                    </p>
+                  ) : null}
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-2xl border border-slate-300/30 bg-slate-950/35 p-4">
+                      <p className="text-xs uppercase tracking-wide text-slate-400">Credits</p>
+                      <p className="mt-2 text-xl font-semibold text-emerald-200">INR {Number(document.total_credits).toFixed(0)}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-300/30 bg-slate-950/35 p-4">
+                      <p className="text-xs uppercase tracking-wide text-slate-400">Debits imported</p>
+                      <p className="mt-2 text-xl font-semibold text-cyan-200">{document.imported_debit_count}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-300/30 bg-slate-950/35 p-4">
+                      <p className="text-xs uppercase tracking-wide text-slate-400">Savings rate</p>
+                      <p className="mt-2 text-xl font-semibold text-slate-100">{savingsRateLabel}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-300/30 bg-slate-950/35 p-4">
+                      <p className="text-xs uppercase tracking-wide text-slate-400">Health score</p>
+                      <p className="mt-2 text-xl font-semibold text-violet-200">{analysis?.healthScore ?? "--"}</p>
+                    </div>
+                  </div>
+
+                  {analysis ? (
+                    <div className="mt-5 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+                      <div className="rounded-2xl border border-slate-300/30 bg-slate-950/30 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Financial health summary</p>
+                        <p className="mt-3 text-sm text-slate-200">{analysis.summary}</p>
+                        <p className="mt-3 inline-flex rounded-full border border-violet-300/35 bg-violet-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-violet-100">
+                          {analysis.financialHealth} • {analysis.balanceTrend} balance trend
+                        </p>
+
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          <div className="rounded-xl border border-slate-300/25 bg-slate-950/30 p-3 text-sm text-slate-200">
+                            <p className="text-xs uppercase tracking-wide text-slate-400">Top spend categories</p>
+                            <ul className="mt-2 space-y-2">
+                              {analysis.topCategories.length === 0 ? (
+                                <li className="text-slate-400">No debit categories inferred yet.</li>
+                              ) : analysis.topCategories.map((row) => (
+                                <li className="flex items-center justify-between gap-3" key={row.category}>
+                                  <span>{row.category}</span>
+                                  <span className="font-semibold text-slate-100">INR {row.amount.toFixed(0)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div className="rounded-xl border border-slate-300/25 bg-slate-950/30 p-3 text-sm text-slate-200">
+                            <p className="text-xs uppercase tracking-wide text-slate-400">Recurring payments</p>
+                            <ul className="mt-2 space-y-2">
+                              {analysis.recurringPayments.length === 0 ? (
+                                <li className="text-slate-400">No recurring payment pattern detected yet.</li>
+                              ) : analysis.recurringPayments.map((row) => (
+                                <li key={`${row.description}-${row.amount}`}>
+                                  <p className="font-medium text-slate-100">{row.description}</p>
+                                  <p className="text-xs text-slate-300">{row.occurrences} occurrences • INR {row.amount.toFixed(0)}</p>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-300/30 bg-slate-950/30 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Risk and recommendations</p>
+                        <div className="mt-3 space-y-3">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-rose-200">Risk indicators</p>
+                            <ul className="mt-2 space-y-2 text-sm text-slate-200">
+                              {analysis.riskIndicators.length === 0 ? (
+                                <li className="rounded-xl border border-emerald-300/30 bg-emerald-950/20 px-3 py-2 text-emerald-100">
+                                  No immediate risk indicators were detected from this statement.
+                                </li>
+                              ) : analysis.riskIndicators.map((item) => (
+                                <li className="rounded-xl border border-rose-300/30 bg-rose-950/20 px-3 py-2" key={item}>
+                                  {item}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-cyan-200">Recommendations</p>
+                            <ul className="mt-2 space-y-2 text-sm text-slate-200">
+                              {analysis.recommendations.map((item) => (
+                                <li className="rounded-xl border border-cyan-300/25 bg-cyan-950/20 px-3 py-2" key={item}>
+                                  {item}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       <section className="glass-card rounded-2xl p-6 sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -682,12 +915,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             />
           </label>
 
-          <label className="text-sm text-slate-200">
+          <label className="relative text-sm text-slate-200">
             <span className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-slate-300">
               <Bolt aria-hidden="true" className="h-3.5 w-3.5" /> Amount (INR)
             </span>
             <input
-              className="w-full rounded-xl border border-indigo-300/30 bg-slate-950/35 px-3 py-2.5 pl-7 text-sm"
+              className="w-full rounded-xl border border-indigo-300/30 bg-slate-950/35 px-3 py-2.5 pl-7 text-sm text-slate-100"
               min="0.01"
               name="amount"
               placeholder="0.00"
@@ -695,7 +928,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               step="0.01"
               type="number"
             />
-            <span className="pointer-events-none absolute mt-[-2.05rem] ml-3 text-xs font-semibold text-slate-400">₹</span>
+            <span className="pointer-events-none absolute bottom-0 left-3 flex h-[2.375rem] items-center text-xs font-semibold text-slate-400">₹</span>
           </label>
 
           <label className="text-sm text-slate-200">
@@ -1415,7 +1648,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         )}
       </section>
 
-      <MobileFinanceNav active="/dashboard" />
     </main>
+    </AppShell>
   );
 }

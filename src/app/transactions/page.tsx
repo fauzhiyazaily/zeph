@@ -4,7 +4,7 @@ import {
   createManualExpense,
   reviewTransactionClassification,
 } from "@/app/dashboard/actions";
-import { MobileFinanceNav } from "@/app/components/mobile-finance-nav";
+import { AppShell } from "@/app/components/app-shell";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -210,7 +210,8 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
   const hasNext = page < totalPages;
 
   return (
-    <main className="finance-shell mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 px-5 py-8 sm:px-6 sm:py-10">
+    <AppShell active="/transactions">
+    <main className="app-content mx-auto w-full max-w-[1600px] flex flex-col gap-6 px-4 py-5 lg:px-6 lg:py-6">
       <header className="rounded-xl border border-slate-300/35 bg-slate-950/35 p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -545,7 +546,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
         </nav>
       </section>
 
-      <MobileFinanceNav active="/transactions" />
     </main>
+    </AppShell>
   );
 }

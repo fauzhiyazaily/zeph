@@ -49,6 +49,13 @@ npm run dev
 
 5. Open `http://localhost:3000`.
 
+6. Verify baseline quality gates.
+
+```bash
+npm run lint
+npm run test
+```
+
 ## Database Setup (Supabase Migrations)
 
 Run these commands once after creating your Supabase project:
@@ -88,6 +95,22 @@ npm run db:push        # push Supabase migrations
 - Never commit real secrets.
 - Keep all secrets in `/.env.local` (already ignored by git).
 - Do not expose server secrets with `NEXT_PUBLIC_` prefixes.
+- `SUPABASE_SERVICE_ROLE_KEY` is server-only: never import or reference it from client components, browser bundles, or public routes.
+- Use only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in browser-accessible code.
+
+## Troubleshooting
+
+- Missing env vars:
+  - Symptom: startup failures or runtime errors about missing Supabase/API configuration.
+  - Fix: confirm all required keys exist in `/.env.local`, then restart `npm run dev`.
+
+- Auth callback mismatch:
+  - Symptom: sign-in redirects fail or callback errors after auth provider login.
+  - Fix: ensure Supabase Auth Site URL is `http://localhost:3000` and Redirect URL is `http://localhost:3000/auth/callback`.
+
+- Invalid Supabase URL/key:
+  - Symptom: `401`/`403` responses, failed data fetches, or auth initialization errors.
+  - Fix: verify project ref and keys copied from the same Supabase project; rotate compromised keys and update `/.env.local`.
 
 ## Project Structure
 

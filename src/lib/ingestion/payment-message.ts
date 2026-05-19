@@ -1,3 +1,5 @@
+import { runIngestionPipeline } from "@/shared/ingestion/index";
+
 export type PaymentSource = "upi" | "card" | "wallet" | "bank" | "unknown";
 
 export type ParseInput = {
@@ -11,6 +13,14 @@ export type ParsedTransaction = {
   currency: "INR";
   merchant: string;
   source: PaymentSource;
+  source_type: string;
+  source_version: string;
+  ingestion_schema_version: string;
+  ingestion_pipeline_version: string;
+  ingestion_batch_id: string;
+  ingested_at: string;
+  normalized_at: string;
+  fingerprint: string;
   reference: string | null;
   timestamp: string;
   rawMessage: string;
@@ -148,15 +158,40 @@ export function parsePaymentMessage(input: ParseInput): ParseResult {
   const referenceMatch = message.match(referencePattern);
   const reference = referenceMatch ? referenceMatch[1].toUpperCase() : null;
 
+  const source = inferSource(message, input.sourceHint);
+  const timestamp = parseTimestamp(message, input.receivedAt);
+
+  const piped = runIngestionPipeline(
+    {
+      merchant,
+      amount,
+      date: timestamp,
+      reference,
+    },
+    {
+      source_type: source,
+      source_version: "1.0.0",
+      ingested_at: input.receivedAt,
+    },
+  );
+
   return {
     ok: true,
     data: {
-      amount,
+      amount: piped.normalized.amount,
       currency: "INR",
-      merchant,
-      source: inferSource(message, input.sourceHint),
-      reference,
-      timestamp: parseTimestamp(message, input.receivedAt),
+      merchant: piped.normalized.merchant,
+      source,
+      source_type: piped.normalized.source_type,
+      source_version: piped.normalized.source_version,
+      ingestion_schema_version: piped.normalized.ingestion_schema_version,
+      ingestion_pipeline_version: piped.normalized.ingestion_pipeline_version,
+      ingestion_batch_id: piped.normalized.ingestion_batch_id,
+      ingested_at: piped.normalized.ingested_at,
+      normalized_at: piped.normalized.normalized_at,
+      fingerprint: piped.normalized.fingerprint,
+      reference: piped.normalized.reference,
+      timestamp,
       rawMessage: message,
     },
   };

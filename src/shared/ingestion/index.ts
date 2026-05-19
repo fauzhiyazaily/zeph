@@ -109,7 +109,8 @@ export type ReconciliationResult = {
   reconciled_at: string;
 };
 
-const shared = require("../../../../shared/ingestion/index.js") as {
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const shared = require('@shared/ingestion') as {
   ALERT_SEVERITY: Readonly<{ INFO: 'info'; WARNING: 'warning'; CRITICAL: 'critical' }>;
   INGESTION_SCHEMA_VERSION: string;
   INGESTION_PIPELINE_VERSION: string;

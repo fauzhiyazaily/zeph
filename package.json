@@ -19,6 +19,7 @@
     "db:push": "npx --yes supabase db push"
   },
   "dependencies": {
+    "@shared/ingestion": "file:../shared/ingestion",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.4",
     "framer-motion": "^12.38.0",

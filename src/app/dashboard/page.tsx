@@ -533,7 +533,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-50 sm:text-4xl">
                 Welcome back to Zeph
               </h1>
-              <p className="mt-2 text-sm text-slate-300">
+              <p className="mt-3 text-sm leading-relaxed text-slate-400">
                 {new Date().toLocaleDateString("en-IN", {
                   weekday: "long",
                   day: "numeric",
@@ -543,37 +543,37 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 {user.email}
               </p>
             </div>
-            <div className="inline-flex items-center gap-3 rounded-2xl border border-indigo-300/35 bg-slate-950/40 px-4 py-3">
-              <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-indigo-500 text-sm font-semibold text-white">
+            <div className="inline-flex shrink-0 items-center gap-3 rounded-2xl border border-indigo-300/35 bg-slate-950/40 px-4 py-3">
+              <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-indigo-500 text-sm font-semibold text-white">
                 {(user.email ?? "U").slice(0, 1).toUpperCase()}
               </div>
-              <div>
+              <div className="min-w-0 overflow-hidden">
                 <p className="text-xs text-slate-300">Active profile</p>
-                <p className="text-sm font-semibold text-slate-100">Personal workspace</p>
+                <p className="truncate text-sm font-semibold text-slate-100">Personal workspace</p>
               </div>
             </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-300">Current balance target</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-50">
+            <article className="min-h-[5.5rem] rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
+              <p className="text-xs uppercase tracking-wide text-slate-400">Current balance target</p>
+              <p className="mt-3 text-3xl font-bold text-slate-50">
                 INR {projectedIncome.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
               </p>
             </article>
-            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-300">Monthly spending</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-50">
+            <article className="min-h-[5.5rem] rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
+              <p className="text-xs uppercase tracking-wide text-slate-400">Monthly spending</p>
+              <p className="mt-3 text-3xl font-bold text-slate-50">
                 INR {monthSpend.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
               </p>
             </article>
-            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-300">Savings progress</p>
-              <p className="mt-2 text-2xl font-semibold text-emerald-300">{savingsProgressPct}%</p>
+            <article className="min-h-[5.5rem] rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
+              <p className="text-xs uppercase tracking-wide text-slate-400">Savings progress</p>
+              <p className="mt-3 text-3xl font-bold text-emerald-300">{savingsProgressPct}%</p>
             </article>
-            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-300">Projected savings</p>
-              <p className="mt-2 text-2xl font-semibold text-cyan-300">
+            <article className="min-h-[5.5rem] rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
+              <p className="text-xs uppercase tracking-wide text-slate-400">Projected savings</p>
+              <p className="mt-3 text-3xl font-bold text-cyan-300">
                 INR {projectedSavings.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
               </p>
             </article>

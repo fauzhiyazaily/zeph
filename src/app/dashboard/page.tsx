@@ -7,7 +7,9 @@ import {
   deleteFinancialDocument,
   editTransactionDetails,
   saveRecommendationAction,
+  setBalanceTarget,
 } from "@/app/dashboard/actions";
+import { BalanceTargetCard } from "@/app/dashboard/balance-target-card";
 import { BankStatementUpload } from "@/app/dashboard/bank-statement-upload";
 import { AppShell } from "@/app/components/app-shell";
 import { SpendPieChart } from "@/app/dashboard/spend-pie-chart";
@@ -43,6 +45,7 @@ import {
 import { computeGoalProgress, summarizeGoalProgress } from "@/lib/goals/progress";
 import type { BankStatementAnalysis } from "@/lib/ingestion/bank-statement-types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getBalanceTarget } from "@/lib/user/income-preferences";
 import { ArrowUpRight, Bolt, Brain, CircleDollarSign, Flag, Sparkles, Wallet } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -173,6 +176,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   if (!user) {
     redirect("/sign-in");
   }
+
+  const balanceTarget = await getBalanceTarget(supabase, user.id);
 
   const consent = getMessageReadingConsent(user);
   const { data: financialDocuments, error: financialDocumentsError } = await supabase
@@ -454,7 +459,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const budgetUtilizationRate = monthBudgetLimitTotal > 0
     ? Math.round((monthSpend / monthBudgetLimitTotal) * 100)
     : 0;
-  const projectedIncome = Math.max(monthSpend * 1.25, monthBudgetLimitTotal * 1.08, 12000);
+  const projectedIncome = balanceTarget ?? Math.max(monthSpend * 1.25, monthBudgetLimitTotal * 1.08, 1);
   const projectedSavings = Math.max(projectedIncome - monthSpend, 0);
   const savingsProgressPct = projectedIncome > 0
     ? Math.round((projectedSavings / projectedIncome) * 100)
@@ -555,12 +560,11 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <article className="min-h-[5.5rem] rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
-              <p className="text-xs uppercase tracking-wide text-slate-400">Current balance target</p>
-              <p className="mt-3 text-3xl font-bold text-slate-50">
-                INR {projectedIncome.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
-              </p>
-            </article>
+            <BalanceTargetCard
+              initialValue={projectedIncome}
+              isUserSet={balanceTarget !== null}
+              setBalanceTarget={setBalanceTarget}
+            />
             <article className="min-h-[5.5rem] rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
               <p className="text-xs uppercase tracking-wide text-slate-400">Monthly spending</p>
               <p className="mt-3 text-3xl font-bold text-slate-50">

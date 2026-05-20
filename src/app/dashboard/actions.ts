@@ -719,3 +719,40 @@ export async function retryFinancialDocumentProcessing(formData: FormData) {
   revalidatePath(`/statements/${document.id}`);
   redirect(`${returnTo}?message=${toRedirectParam("Statement processing retried successfully.")}`);
 }
+
+export async function setBalanceTarget(formData: FormData): Promise<{ error: string | null }> {
+  enforceServerSecretPolicy();
+
+  const raw = String(formData.get("balance_target") ?? "").trim();
+  const value = Number(raw);
+
+  if (!raw || Number.isNaN(value) || !Number.isFinite(value) || value <= 0) {
+    return { error: "Balance target must be a positive finite number." };
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Not authenticated." };
+  }
+
+  const { error: dbError } = await supabase.from("user_income_preferences").upsert(
+    {
+      user_id: user.id,
+      balance_target: value,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" },
+  );
+
+  if (dbError) {
+    console.error("[setBalanceTarget] upsert failed:", dbError.message);
+    return { error: "Failed to save balance target. Please try again." };
+  }
+
+  revalidatePath("/dashboard");
+  return { error: null };
+}

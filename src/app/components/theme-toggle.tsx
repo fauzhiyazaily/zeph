@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
@@ -10,16 +10,15 @@ type ThemeToggleProps = {
 
 export function ThemeToggle({ className }: ThemeToggleProps) {
   const { resolvedTheme, setTheme } = useTheme();
-  // Track mount only to render the correct icon after hydration without mismatch.
-  // The button itself is always enabled — clicking before hydration is harmless.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false,
+  );
 
   const currentTheme = mounted ? (resolvedTheme ?? "dark") : "dark";
   const isDark = currentTheme === "dark";
-  const label = isDark ? "Switch to light mode" : "Switch to dark mode";
+  const label = isDark ? "Dark mode \u2014 switch to light" : "Light mode \u2014 switch to dark";
 
   const handleToggle = () => {
     const next = isDark ? "light" : "dark";
@@ -37,10 +36,10 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
       suppressHydrationWarning
     >
       <span className="theme-toggle-icon" aria-hidden="true" suppressHydrationWarning>
-        {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        {isDark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
       </span>
       <span className="theme-toggle-label" suppressHydrationWarning>
-        {isDark ? "Light" : "Dark"}
+        {isDark ? "Dark mode" : "Light mode"}
       </span>
     </button>
   );

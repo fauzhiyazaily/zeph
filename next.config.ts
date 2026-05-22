@@ -24,7 +24,12 @@ const cspHeader = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
-  outputFileTracingRoot: path.join(__dirname, '..'),
+  output: 'standalone',
+  serverExternalPackages: ["unpdf"],
+  outputFileTracingRoot: path.join(__dirname),
+  outputFileTracingIncludes: {
+    "/*": ["../shared/ingestion/**/*"],
+  },
   poweredByHeader: false,
   async headers() {
     return [

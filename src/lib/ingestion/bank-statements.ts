@@ -1,7 +1,6 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { PDFParse } from "pdf-parse";
 import * as XLSX from "xlsx";
 import { analyzeBankStatement } from "@/lib/ai/bank-statement-analysis";
 import { classifyTransaction } from "@/lib/ai/classification";
@@ -211,6 +210,64 @@ function parseStatementDate(raw: string | number | Date | null | undefined) {
   const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw;
   const candidate = new Date(`${year}-${monthRaw.padStart(2, "0")}-${dayRaw.padStart(2, "0")}T00:00:00Z`);
   return Number.isNaN(candidate.getTime()) ? null : candidate.toISOString();
+}
+
+function parsePhonePeStatementDateTime(dateRaw: string, timeRaw: string) {
+  const match = dateRaw.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+  if (!match) {
+    return null;
+  }
+
+  const monthMap: Record<string, number> = {
+    jan: 0,
+    feb: 1,
+    mar: 2,
+    apr: 3,
+    may: 4,
+    jun: 5,
+    jul: 6,
+    aug: 7,
+    sep: 8,
+    oct: 9,
+    nov: 10,
+    dec: 11,
+  };
+
+  const month = monthMap[match[1].slice(0, 3).toLowerCase()];
+  if (month === undefined) {
+    return null;
+  }
+
+  const day = Number.parseInt(match[2], 10);
+  const year = Number.parseInt(match[3], 10);
+  const timeMatch = timeRaw.trim().toLowerCase().match(/^(\d{1,2}):(\d{2})\s*([ap]m)$/);
+  if (!timeMatch) {
+    return null;
+  }
+
+  let hour = Number.parseInt(timeMatch[1], 10) % 12;
+  const minute = Number.parseInt(timeMatch[2], 10);
+  if (timeMatch[3] === "pm") {
+    hour += 12;
+  }
+
+  // PhonePe statements are in IST (UTC+05:30). Convert to UTC for canonical ISO output.
+  const utcMs = Date.UTC(year, month, day, hour, minute) - (5.5 * 60 * 60 * 1000);
+  const parsed = new Date(utcMs);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function summarizeError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return { name: "UnknownError" };
+  }
+
+  const withCode = error as Error & { code?: unknown };
+  return {
+    name: error.name,
+    message: error.message,
+    code: typeof withCode.code === "string" ? withCode.code : undefined,
+  };
 }
 
 function matchesAlias(value: string, aliases: string[]) {
@@ -429,7 +486,67 @@ function parseWorkbook(buffer: Buffer) {
   };
 }
 
+function parsePhonePeStatement(text: string) {
+  const metadata = extractMetadataFromText(text);
+  if (!metadata.bankName) {
+    metadata.bankName = "PhonePe";
+  }
+
+  // Extract phone number as masked account if no account number found
+  if (!metadata.accountNumberMasked) {
+    const phoneMatch = text.match(/Transaction Statement for (\d{10})/);
+    if (phoneMatch) {
+      metadata.accountNumberMasked = `XXXXXX${phoneMatch[1].slice(-4)}`;
+    }
+  }
+
+  const pattern =
+    /(\w+\s+\d{1,2},\s+\d{4})\s+(\d{1,2}:\d{2}\s*[ap]m)\s+(DEBIT|CREDIT)\s+(?:₹|inr|rs\.?)?\s*([\d,]+(?:\.\d+)?)\s*(Paid to|Received from|Refund from|Reversed to|Cashback from)\s+(.+?)(?:\s+Transaction ID\s+([A-Za-z0-9-]+))?(?:\s+UTR(?:\s+No\.)?\s+([A-Za-z0-9-]+))?(?=\s+(?:\w+\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s*[ap]m\s+(?:DEBIT|CREDIT))|$)/gi;
+
+  const transactions: ParsedStatementTransaction[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    const [rawText, date, time, typeStr, amountRaw, , merchant, txnId, utr] = match;
+    const amount = parseFloat(amountRaw.replace(/,/g, ""));
+    if (Number.isNaN(amount) || amount <= 0) {
+      continue;
+    }
+
+    const postedAt = parsePhonePeStatementDateTime(date, time);
+    if (!postedAt) {
+      continue;
+    }
+
+    const direction: "credit" | "debit" = typeStr.toUpperCase() === "CREDIT" ? "credit" : "debit";
+    const description = normalizeWhitespace(merchant);
+
+    transactions.push({
+      postedAt,
+      description,
+      amount: Number(amount.toFixed(2)),
+      direction,
+      balance: null,
+      reference: txnId ?? utr ?? extractReference(rawText),
+      category: inferCategory(description),
+      isSalary: isSalaryDescription(description),
+      isEmi: isEmiDescription(description),
+      rawText,
+    });
+  }
+
+  return {
+    metadata,
+    transactions: transactions.sort((left, right) => left.postedAt.localeCompare(right.postedAt)),
+  };
+}
+
 function parsePdfStatementLines(text: string) {
+  // Detect PhonePe statement by its header
+  if (/Transaction Statement for \d{10}/i.test(text) || /phonepe/i.test(text.slice(0, 200))) {
+    return parsePhonePeStatement(text);
+  }
+
   const metadata = extractMetadataFromText(text);
   const lines = text.split(/\r?\n/).map((line) => normalizeWhitespace(line)).filter(Boolean);
   const transactions: ParsedStatementTransaction[] = [];
@@ -679,10 +796,10 @@ async function parseBankStatementFile(file: File): Promise<ParseSuccess | ParseF
     }
 
     if (validation.mimeType === "application/pdf") {
-      const parser = new PDFParse({ data: buffer });
-      const parsedPdf = await parser.getText();
-      await parser.destroy();
-      const textParsed = parsePdfStatementLines(parsedPdf.text);
+      const { extractText } = await import("unpdf");
+      const { text: fullText } = await extractText(new Uint8Array(buffer), { mergePages: true });
+
+      const textParsed = parsePdfStatementLines(fullText);
       if (textParsed.transactions.length === 0) {
         return {
           ok: false,
@@ -706,7 +823,8 @@ async function parseBankStatementFile(file: File): Promise<ParseSuccess | ParseF
     }
 
     return { ok: true, data: buildParsedStatement(imageParsed, imageParsed.transactions) };
-  } catch {
+  } catch (error) {
+    console.error("[bank-statement] parseBankStatementFile error", summarizeError(error));
     return {
       ok: false,
       code: "PROCESSING_FAILED",
@@ -951,7 +1069,8 @@ export async function importBankStatementForUser(
 
   try {
     documentId = await upsertDocumentRecord(supabase, userId, fingerprint, file, existing?.id);
-  } catch {
+  } catch (error) {
+    console.error("[bank-statement] upsertDocumentRecord error", summarizeError(error));
     await persistBatchAudit({
       ingestion_batch_id: defaultBatchId,
       total_rows: 1,
@@ -1229,4 +1348,5 @@ export const __test__ = {
   maskAccountNumber,
   parseWorkbook,
   parsePdfStatementLines,
+  importDebitTransaction,
 };

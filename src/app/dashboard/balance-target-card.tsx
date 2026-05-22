@@ -5,14 +5,21 @@ import { useState } from "react";
 import { Pencil, X, Check } from "lucide-react";
 
 type SetBalanceTargetAction = (formData: FormData) => Promise<{ error: string | null }>;
+type ClearBalanceTargetAction = () => Promise<{ error: string | null }>;
 
 interface BalanceTargetCardProps {
   initialValue: number;
   isUserSet: boolean;
+  clearBalanceTarget: ClearBalanceTargetAction;
   setBalanceTarget: SetBalanceTargetAction;
 }
 
-export function BalanceTargetCard({ initialValue, isUserSet, setBalanceTarget }: BalanceTargetCardProps) {
+export function BalanceTargetCard({
+  initialValue,
+  isUserSet,
+  clearBalanceTarget,
+  setBalanceTarget,
+}: BalanceTargetCardProps) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState(String(initialValue));
@@ -56,24 +63,56 @@ export function BalanceTargetCard({ initialValue, isUserSet, setBalanceTarget }:
     router.refresh();
   }
 
+  async function handleResetToAuto() {
+    setSaving(true);
+    setError(null);
+
+    const result = await clearBalanceTarget();
+
+    setSaving(false);
+
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+
+    setEditing(false);
+    router.refresh();
+  }
+
   return (
-    <article className="min-h-[5.5rem] rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
-      <div className="flex items-center gap-2">
-        <p className="text-xs uppercase tracking-wide text-slate-400">Current balance target</p>
+    <article className="min-h-[5.5rem] min-w-0 rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        {/* ZEPH-FIX: sentence-case label with higher contrast (issue 6); fluid eyebrow scale */}
+        <p className="text-fluid-eyebrow font-medium text-slate-300">Current balance target</p>
         {isUserSet && (
           <span className="rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-sky-300">
             custom
           </span>
         )}
         {!editing && (
-          <button
-            aria-label="Edit balance target"
-            className="ml-auto rounded p-0.5 text-slate-500 transition hover:text-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500"
-            onClick={openEdit}
-            type="button"
-          >
-            <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            {isUserSet ? (
+              <button
+                aria-label="Reset balance target to auto"
+                className="rounded-lg border border-slate-600/70 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={saving}
+                onClick={handleResetToAuto}
+                type="button"
+              >
+                Auto
+              </button>
+            ) : null}
+            <button
+              aria-label="Edit balance target"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-800/50 hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500"
+              disabled={saving}
+              onClick={openEdit}
+              type="button"
+            >
+              <Pencil aria-hidden="true" className="h-4 w-4" />
+            </button>
+          </div>
         )}
       </div>
 
@@ -111,7 +150,7 @@ export function BalanceTargetCard({ initialValue, isUserSet, setBalanceTarget }:
           {error && <p className="text-xs text-rose-400">{error}</p>}
         </div>
       ) : (
-        <p className="mt-3 text-3xl font-bold text-slate-50">
+        <p className="mt-3 text-fluid-stat font-bold text-slate-50">
           INR {initialValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
         </p>
       )}

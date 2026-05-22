@@ -33,7 +33,7 @@ export function SpendPieChart({ breakdown, wafflePalette }: SpendPieChartProps) 
       : "conic-gradient(#334155 0% 100%)";
 
   return (
-    <div className="mt-4 grid gap-4 sm:grid-cols-[200px_1fr] sm:items-center">
+    <div className="mt-4 grid gap-4 touch-manipulation sm:grid-cols-[200px_1fr] sm:items-center">
       <div className="mx-auto flex aspect-square w-full max-w-[200px] min-w-[140px] items-center justify-center rounded-full border border-indigo-300/35 bg-slate-950/20 p-4">
         <div
           className="relative h-full w-full rounded-full"

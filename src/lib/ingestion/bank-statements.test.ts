@@ -3,6 +3,17 @@ import * as XLSX from "xlsx";
 
 vi.mock("server-only", () => ({}));
 
+const classifyTransactionMock = vi.fn();
+const persistTransactionMock = vi.fn();
+
+vi.mock("@/lib/ai/classification", () => ({
+  classifyTransaction: (...args: unknown[]) => classifyTransactionMock(...args),
+}));
+
+vi.mock("@/lib/transactions/persistence", () => ({
+  persistTransaction: (...args: unknown[]) => persistTransactionMock(...args),
+}));
+
 import { analyzeBankStatement } from "@/lib/ai/bank-statement-analysis";
 import { __test__ } from "@/lib/ingestion/bank-statements";
 import type { ParsedBankStatement } from "@/lib/ingestion/bank-statement-types";
@@ -98,6 +109,39 @@ describe("bank statement parsing", () => {
     expect(parsed.transactions[0]).toMatchObject({ direction: "credit", amount: 64000 });
     expect(parsed.transactions[1]).toMatchObject({ direction: "debit", amount: 1750, category: "Groceries" });
   });
+
+  it("parses PhonePe PDF text when spacing/currency/UTR fields vary", () => {
+    const parsed = __test__.parsePdfStatementLines(
+      "Transaction Statement for 9999912345 "
+      + "May 20, 2026 09:52 am DEBIT INR 367 Paid to CAFE BLEND Transaction ID TXN001 "
+      + "May 21, 2026 10:01 am CREDIT Rs 120.50 Received from RAHUL UTR No. UTR8899",
+    );
+
+    expect(parsed.metadata.accountNumberMasked).toBe("XXXXXX2345");
+    expect(parsed.transactions).toHaveLength(2);
+    expect(parsed.transactions[0]).toMatchObject({
+      amount: 367,
+      direction: "debit",
+      description: "CAFE BLEND",
+      reference: "TXN001",
+    });
+    expect(parsed.transactions[1]).toMatchObject({
+      amount: 120.5,
+      direction: "credit",
+      description: "RAHUL",
+      reference: "UTR8899",
+    });
+  });
+
+  it("converts PhonePe statement timestamps from IST to UTC deterministically", () => {
+    const parsed = __test__.parsePdfStatementLines(
+      "Transaction Statement for 9999912345 "
+      + "May 20, 2026 09:52 am DEBIT ₹367 Paid to CAFE BLEND Transaction ID TXN001",
+    );
+
+    expect(parsed.transactions).toHaveLength(1);
+    expect(parsed.transactions[0]?.postedAt).toBe("2026-05-20T04:22:00.000Z");
+  });
 });
 
 describe("bank statement analysis", () => {
@@ -168,5 +212,78 @@ describe("bank statement analysis", () => {
     expect(analysis.topCategories[0]?.category).toBe("EMI");
     expect(analysis.riskIndicators.length).toBeGreaterThan(0);
     expect(analysis.recommendations.length).toBeGreaterThan(0);
+  });
+});
+
+describe("bank statement import degradation", () => {
+  it("keeps debit transaction persisted when AI classification degrades", async () => {
+    const updateMock = vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    });
+
+    const supabase = {
+      from: vi.fn().mockReturnValue({
+        update: updateMock,
+      }),
+    };
+
+    persistTransactionMock.mockResolvedValue({
+      ok: true,
+      deduplicated: false,
+      transaction: {
+        id: "tx-bank-1",
+        userId: "u1",
+        ingestionId: "statement:abc",
+        ingestionBatchId: "bank-statement:doc-1",
+        fingerprint: "fp-1",
+        amount: 450,
+        merchant: "Cafe Blend",
+        source: "bank",
+        reference: "TXN001",
+        timestamp: "2026-05-20T04:22:00.000Z",
+        createdAt: "2026-05-20T04:22:00.000Z",
+        updatedAt: "2026-05-20T04:22:00.000Z",
+      },
+    });
+
+    classifyTransactionMock.mockResolvedValue({
+      ok: false,
+      reason: "classification timeout",
+      retryable: true,
+    });
+
+    const result = await __test__.importDebitTransaction(
+      supabase as never,
+      "u1",
+      "doc-1",
+      {
+        postedAt: "2026-05-20T04:22:00.000Z",
+        description: "Cafe Blend",
+        amount: 450,
+        direction: "debit",
+        balance: 12250,
+        reference: "TXN001",
+        category: "Food",
+        isSalary: false,
+        isEmi: false,
+      },
+    );
+
+    expect(result).toEqual({
+      transactionId: "tx-bank-1",
+      deduplicated: false,
+      persisted: true,
+      reason: null,
+    });
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        financial_document_id: "doc-1",
+        category: "Food",
+        ai_classification: null,
+        ai_reason: null,
+      }),
+    );
   });
 });

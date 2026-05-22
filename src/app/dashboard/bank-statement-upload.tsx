@@ -54,6 +54,17 @@ export function BankStatementUpload() {
     };
 
     xhr.onload = () => {
+      const contentType = xhr.getResponseHeader("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        console.error("[bank-statement] Non-JSON response:", xhr.responseText.slice(0, 200));
+        setState({
+          status: "error",
+          message: "The server returned an unexpected response. Please try again.",
+          retryable: true,
+        });
+        return;
+      }
+
       const raw = xhr.responseText || "{}";
       const payload = JSON.parse(raw) as {
         status?: "accepted" | "rejected";

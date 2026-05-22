@@ -284,11 +284,13 @@ summary:focus-visible {
   .app-content {
     padding-bottom: 2rem;
     margin-left: var(--sidebar-w);
-    transition: margin-left 200ms ease;
+    max-width: calc(100% - var(--sidebar-w));
+    transition: margin-left 200ms ease, max-width 200ms ease;
   }
 
   .app-shell.sidebar-collapsed .app-content {
     margin-left: var(--sidebar-w-collapsed);
+    max-width: calc(100% - var(--sidebar-w-collapsed));
   }
 }
 
@@ -446,7 +448,8 @@ summary:focus-visible {
     box-shadow:
       4px 0 24px -8px rgba(2, 6, 23, 0.5),
       inset -1px 0 0 rgba(226, 232, 240, 0.06);
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     transition: width 200ms ease;
   }
 
@@ -511,9 +514,12 @@ summary:focus-visible {
 
 .app-brand-subtitle {
   color: rgba(148, 163, 184, 0.88);
-  font-size: 0.68rem;
+  font-size: 0.63rem;
   line-height: 1.3;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
 }
 
 .app-sidebar-collapse-btn {
@@ -627,15 +633,56 @@ summary:focus-visible {
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
+  /* ZEPH-FIX: allow tooltip pseudo-element to overflow (issue 3) */
+  overflow: visible;
 }
 
 .app-shell.sidebar-collapsed .app-sidebar-link.active::after {
   right: 0.2rem;
 }
 
+/* ZEPH-FIX: allow CSS tooltips to extend beyond sidebar in collapsed mode (issue 3) */
+.app-shell.sidebar-collapsed .app-sidebar {
+  overflow-x: visible;
+}
+.app-shell.sidebar-collapsed .app-sidebar-nav {
+  overflow-x: visible;
+}
+
+/* ZEPH-FIX: CSS floating tooltip for collapsed sidebar nav links (issue 3) */
+.app-shell.sidebar-collapsed .app-sidebar-link[data-tooltip]::before {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 0.75rem);
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  background: rgba(15, 23, 42, 0.97);
+  color: #f1f5f9;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0.3rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.app-shell.sidebar-collapsed .app-sidebar-link[data-tooltip]:hover::before {
+  opacity: 1;
+}
+
 .app-sidebar-footer {
   margin-top: auto;
   padding-top: 0.5rem;
+  padding-bottom: 0.75rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(7, 11, 31, 0.15) 0%, rgba(7, 11, 31, 0.92) 36%);
+  backdrop-filter: blur(8px);
   flex-shrink: 0;
 }
 
@@ -1053,10 +1100,20 @@ body,
   border-color: rgba(59, 130, 246, 0.35);
 }
 
+/* ZEPH-FIX: stronger active nav with left accent indicator for light mode (issue 3) */
 :root[data-theme="light"] .app-sidebar-link.active {
-  background: linear-gradient(145deg, rgba(59, 130, 246, 0.16), rgba(37, 99, 235, 0.2));
-  color: #0f172a;
+  background: linear-gradient(145deg, rgba(59, 130, 246, 0.12), rgba(37, 99, 235, 0.16));
+  color: #1d4ed8;
   border-color: rgba(59, 130, 246, 0.52);
+  font-weight: 600;
+  box-shadow:
+    0 12px 24px -20px rgba(37, 99, 235, 0.45),
+    inset 0 0 0 1px rgba(96, 165, 250, 0.3),
+    inset 3px 0 0 #2563eb;
+}
+
+/* Remove left accent in collapsed icon-only mode */
+:root[data-theme="light"] .app-shell.sidebar-collapsed .app-sidebar-link.active {
   box-shadow:
     0 12px 24px -20px rgba(37, 99, 235, 0.45),
     inset 0 0 0 1px rgba(96, 165, 250, 0.3);
@@ -1145,6 +1202,24 @@ body,
   color: #047857 !important;
 }
 
+/* ZEPH-FIX: fix low-contrast accent link colors in light mode (issues 7, 9) */
+:root[data-theme="light"] .premium-action-card [class*="text-indigo-"] {
+  color: #3730a3 !important;
+}
+:root[data-theme="light"] .premium-action-card [class*="text-violet-"] {
+  color: #5b21b6 !important;
+}
+:root[data-theme="light"] .premium-action-card [class*="text-amber-"] {
+  color: #92400e !important;
+}
+:root[data-theme="light"] .premium-action-card [class*="text-sky-3"],
+:root[data-theme="light"] .premium-action-card [class*="text-sky-2"] {
+  color: #0369a1 !important;
+}
+:root[data-theme="light"] .premium-action-card [class*="text-cyan-"] {
+  color: #0e7490 !important;
+}
+
 :root[data-theme="light"] [class*="bg-slate-950"],
 :root[data-theme="light"] [class*="bg-slate-900"],
 :root[data-theme="light"] [class*="bg-slate-800"],
@@ -1156,6 +1231,14 @@ body,
 :root[data-theme="light"] [class*="border-slate-"] {
   border-color: rgba(148, 163, 184, 0.4) !important;
 }
+
+/* ZEPH-FIX: metric cards need a visible border in light mode (bug #10) */
+:root[data-theme="light"] article[class*="border-slate-700"],
+:root[data-theme="light"] article[class*="border-slate-600"] {
+  border-color: rgba(100, 116, 139, 0.35) !important;
+  box-shadow: 0 1px 4px 0 rgba(15, 23, 42, 0.06);
+}
+
 
 :root[data-theme="light"] [class*="bg-slate-"][class*="text-white"],
 :root[data-theme="light"] [class*="bg-slate-"][class*="text-slate-50"] {
@@ -1292,9 +1375,12 @@ html {
 }
 
 /* ── Desktop optimization (1024px+) ── */
+/* NOTE: do NOT set max-width here — the base rule correctly uses
+   calc(100% - var(--sidebar-w)). Overriding with 100% causes the
+   content to bleed 220px past the right edge of the viewport. */
 @media (min-width: 1024px) {
   .app-content {
-    max-width: 100% !important;
+    overflow-x: hidden;
   }
 }
 
@@ -1473,4 +1559,164 @@ canvas {
 
 :root[data-theme="light"] .app-bottom-nav-link:active {
   background: rgba(2, 132, 199, 0.08);
+}
+
+/* ===========================================================
+   ZEPH-FIX: Dashboard Responsive Layout & UI Polish (2026-05-21)
+   =========================================================== */
+
+/* Fluid typography (clamp-based, viewport-responsive) */
+.text-fluid-hero {
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
+  line-height: 1.15;
+}
+.text-fluid-stat {
+  /* Cap at 1.625rem so 4-up stat grid fits inside (viewport - 220px sidebar) at xl */
+  font-size: clamp(1.125rem, 2.2vw, 1.625rem);
+  line-height: 1.2;
+  /* Allow long INR amounts to break onto the next line instead of clipping */
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.text-fluid-eyebrow {
+  font-size: clamp(0.65rem, 1.5vw, 0.75rem);
+  line-height: 1.3;
+}
+.text-fluid-eyebrow-strong {
+  font-size: clamp(0.7rem, 1.6vw, 0.8rem);
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+/* Status pills wrap + min-width so labels don't truncate */
+.status-pill {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.status-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  row-gap: 0.5rem;
+}
+
+/* Pulsing red border for the over-budget banner */
+@keyframes pulseAlertBorder {
+  0%, 100% {
+    box-shadow:
+      0 0 0 0 rgba(244, 63, 94, 0.55),
+      inset 0 0 0 1px rgba(244, 63, 94, 0.85);
+  }
+  50% {
+    box-shadow:
+      0 0 0 6px rgba(244, 63, 94, 0),
+      inset 0 0 0 1px rgba(244, 63, 94, 1);
+  }
+}
+.over-budget-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid rgba(244, 63, 94, 0.6);
+  background: linear-gradient(140deg, rgba(76, 5, 25, 0.92), rgba(48, 8, 22, 0.88));
+  color: #fecdd3;
+  padding: 0.9rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  animation: pulseAlertBorder 2s ease-in-out infinite;
+}
+.over-budget-banner-fix {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5rem 1rem;
+  margin-left: auto;
+  border-radius: 12px;
+  background: rgba(244, 63, 94, 0.9);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-decoration: none;
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+.over-budget-banner-fix:hover {
+  background: rgba(225, 29, 72, 1);
+  transform: translateY(-1px);
+}
+.over-budget-banner-fix:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Universal focus-visible rings on nav/icon controls */
+.app-sidebar-link:focus-visible,
+.app-bottom-nav-link:focus-visible,
+.app-sidebar-collapse-btn:focus-visible,
+.app-topbar-hamburger:focus-visible,
+.app-overlay-close:focus-visible {
+  outline: 2px solid var(--focus-ring-outer);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+/* Show collapsed-sidebar tooltip on focus-visible too (a11y parity with hover) */
+.app-shell.sidebar-collapsed .app-sidebar-link[data-tooltip]:focus-visible::before {
+  opacity: 1;
+}
+
+/* 44x44 hit area for the sidebar toggle (visual size unchanged via padding) */
+.app-sidebar-collapse-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+
+/* Bottom-nav links: enforce 44px minimum tap target */
+.app-bottom-nav-link {
+  min-height: 44px;
+}
+
+/* Brand subtitle hierarchy bump */
+.app-brand-subtitle {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Stat cards: auto-fit so cards never overflow regardless of viewport width */
+.stat-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 1rem;
+  width: 100%;
+}
+
+/* Quick-action card link CTA (unified style across all three cards) */
+.quick-action-cta {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+.quick-action-cta:focus-visible {
+  outline: 2px solid var(--focus-ring-outer);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Hamburger / overlay-close: enforce 44x44 */
+.app-topbar-hamburger,
+.app-overlay-close {
+  min-width: 44px;
+  min-height: 44px;
 }

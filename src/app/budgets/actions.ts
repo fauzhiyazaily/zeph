@@ -10,13 +10,19 @@ function parseCheckbox(formData: FormData, key: string) {
   return String(formData.get(key) ?? "") === "on";
 }
 
+function parseReturnTo(formData: FormData, fallback = "/budgets") {
+  const value = String(formData.get("returnTo") ?? fallback).trim();
+  return value.startsWith("/") ? value : fallback;
+}
+
 export async function upsertBudget(formData: FormData) {
   enforceServerSecretPolicy();
 
+  const budgetId = String(formData.get("budgetId") ?? "").trim();
   const category = String(formData.get("category") ?? "").trim();
   const month = String(formData.get("month") ?? "").trim();
   const amountLimit = String(formData.get("amountLimit") ?? "").trim();
-  const returnTo = String(formData.get("returnTo") ?? "/budgets").trim();
+  const returnTo = parseReturnTo(formData);
 
   const validationError = validateBudgetInput({ category, month, amountLimit });
   if (validationError) {
@@ -33,31 +39,62 @@ export async function upsertBudget(formData: FormData) {
   }
 
   const limit = Number(amountLimit);
+  const normalizedCategory = category.toLowerCase();
 
-  const { error } = await supabase.from("budgets").upsert(
-    {
-      user_id: user.id,
-      category: category.toLowerCase(),
-      month,
-      amount_limit: limit,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id,category,month" },
-  );
+  if (budgetId) {
+    const { data, error } = await supabase
+      .from("budgets")
+      .update({
+        amount_limit: limit,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", budgetId)
+      .eq("user_id", user.id)
+      .select("id")
+      .returns<Array<{ id: string }>>();
+
+    if (error) {
+      redirect(`${returnTo}?error=${encodeURIComponent("Failed to update budget. Try again.")}`);
+    }
+
+    if (!data || data.length === 0) {
+      redirect(`${returnTo}?error=${encodeURIComponent("Budget could not be updated. It may be unavailable.")}`);
+    }
+
+    revalidatePath("/budgets");
+    revalidatePath("/dashboard");
+    redirect(`${returnTo}?message=${encodeURIComponent("Budget updated.")}`);
+  }
+
+  const { error } = await supabase.from("budgets").insert({
+    user_id: user.id,
+    category: normalizedCategory,
+    month,
+    amount_limit: limit,
+  });
 
   if (error) {
+    if (error.code === "23505") {
+      redirect(
+        `${returnTo}?error=${encodeURIComponent(
+          "A budget already exists for this category and month. Edit the existing budget instead.",
+        )}`,
+      );
+    }
+
     redirect(`${returnTo}?error=${encodeURIComponent("Failed to save budget. Try again.")}`);
   }
 
   revalidatePath("/budgets");
-  redirect(`${returnTo}?message=${encodeURIComponent("Budget saved.")}`);
+  revalidatePath("/dashboard");
+  redirect(`${returnTo}?message=${encodeURIComponent("Budget created.")}`);
 }
 
 export async function deleteBudget(formData: FormData) {
   enforceServerSecretPolicy();
 
   const budgetId = String(formData.get("budgetId") ?? "").trim();
-  const returnTo = String(formData.get("returnTo") ?? "/budgets").trim();
+  const returnTo = parseReturnTo(formData);
 
   if (!budgetId) {
     redirect(`${returnTo}?error=${encodeURIComponent("Missing budget identifier.")}`);
@@ -83,13 +120,14 @@ export async function deleteBudget(formData: FormData) {
   }
 
   revalidatePath("/budgets");
+  revalidatePath("/dashboard");
   redirect(`${returnTo}?message=${encodeURIComponent("Budget deleted.")}`);
 }
 
 export async function saveBudgetAlertPreferences(formData: FormData) {
   enforceServerSecretPolicy();
 
-  const returnTo = String(formData.get("returnTo") ?? "/budgets").trim();
+  const returnTo = parseReturnTo(formData);
 
   const alert75Enabled = parseCheckbox(formData, "alert75Enabled");
   const alert100Enabled = parseCheckbox(formData, "alert100Enabled");

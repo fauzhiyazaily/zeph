@@ -7,6 +7,7 @@ import {
   deleteFinancialDocument,
   editTransactionDetails,
   saveRecommendationAction,
+  clearBalanceTarget,
   setBalanceTarget,
 } from "@/app/dashboard/actions";
 import { BalanceTargetCard } from "@/app/dashboard/balance-target-card";
@@ -37,6 +38,11 @@ import {
   buildHabitTrendInsights,
   type ClassifiedTransaction,
 } from "@/lib/insights/habit-trends";
+import {
+  buildWeeklyTrendData,
+  computeWeekSpendComparison,
+} from "@/lib/insights/overview-summary";
+import { getTransactionStatus } from "@/lib/insights/transaction-status";
 import { type Goal } from "@/lib/goals/goal-helpers";
 import {
   evaluateGoalMilestones,
@@ -292,23 +298,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
   const breakdown = buildCategoryBreakdown(chartRows, chartWindowStart, chartWindowEnd);
   const totalPeriodSpend = breakdown.reduce((sum, row) => sum + row.amount, 0);
-
-  const pieMonth = currentMonthKey();
-  const pieMonthRange = monthBoundsFromKey(pieMonth);
-  const { data: pieRows } = await supabase
-    .from("transactions")
-    .select("amount,category,date")
-    .eq("user_id", user.id)
-    .gte("date", pieMonthRange.start.toISOString())
-    .lt("date", pieMonthRange.end.toISOString())
-    .returns<SpendRecord[]>();
-
-  const pieBreakdownCurrentMonth = buildCategoryBreakdown(
-    pieRows ?? [],
-    pieMonthRange.start,
-    pieMonthRange.end,
-  );
-  const pieBreakdown = pieBreakdownCurrentMonth.length > 0 ? pieBreakdownCurrentMonth : breakdown;
+  const categoryChartBreakdown = breakdown;
+  const categoryChartLabel = period === "last"
+    ? "Spending categories (last week)"
+    : "Spending categories (this week)";
 
   let focusedRecommendationRows: FocusedRecommendationRow[] = [];
   let focusedRecommendationError: string | null = null;
@@ -410,6 +403,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const dashboardGoalProgress = (dashboardGoals ?? []).map((goal) => computeGoalProgress(goal));
   const dashboardGoalSummary = summarizeGoalProgress(dashboardGoalProgress);
 
+  // ZEPH-FIX: savings time horizon from nearest goal deadline (issue 5)
+  const nearestDeadlineGoal = (dashboardGoals ?? []).find((g) => g.deadline);
+  const savingsHorizon = nearestDeadlineGoal?.deadline
+    ? new Date(nearestDeadlineGoal.deadline).toLocaleDateString("en-IN", { month: "short", year: "numeric" })
+    : "this month";
+
   await evaluateGoalMilestones({
     supabase,
     userId: user.id,
@@ -459,45 +458,31 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const budgetUtilizationRate = monthBudgetLimitTotal > 0
     ? Math.round((monthSpend / monthBudgetLimitTotal) * 100)
     : 0;
+  const displayUtilization = Math.min(budgetUtilizationRate, 999);
   const projectedIncome = balanceTarget ?? Math.max(monthSpend * 1.25, monthBudgetLimitTotal * 1.08, 1);
   const projectedSavings = Math.max(projectedIncome - monthSpend, 0);
   const savingsProgressPct = projectedIncome > 0
     ? Math.round((projectedSavings / projectedIncome) * 100)
     : 0;
 
-  const weeklySpendMap = new Map<string, { day: string; amount: number }>();
-  const trendWindowEnd = chartWindowEnd;
-  const trendWindowStart = new Date(trendWindowEnd);
-  trendWindowStart.setUTCDate(trendWindowStart.getUTCDate() - 7);
-  for (let i = 0; i < 7; i += 1) {
-    const date = new Date(trendWindowStart);
-    date.setUTCDate(date.getUTCDate() + i);
-    const key = date.toISOString().slice(0, 10);
-    weeklySpendMap.set(key, {
-      day: date.toLocaleDateString("en-IN", { weekday: "short" }),
-      amount: 0,
-    });
-  }
+  const weeklyTrendData = buildWeeklyTrendData(chartRows, chartWindowEnd);
 
-  chartRows.forEach((row) => {
-    const date = new Date(row.date);
-    if (date < trendWindowStart || date >= trendWindowEnd) {
-      return;
-    }
-    const key = date.toISOString().slice(0, 10);
-    const existing = weeklySpendMap.get(key);
-    if (!existing) {
-      return;
-    }
-    existing.amount += Number(row.amount);
-  });
+  // ZEPH-FIX: budget state flags (issues 1, 2)
+  const noBudgetSetup = dashboardBudgetList.length === 0;
+  const chipBase = "inline-flex items-center gap-2 rounded-full border text-[0.72rem] font-semibold py-[0.35rem] px-[0.7rem]";
+  const isBudgetOverLimit = !noBudgetSetup && budgetUtilizationRate > 100;
+  const isBudgetNearLimit = !noBudgetSetup && budgetUtilizationRate >= 80 && budgetUtilizationRate <= 100;
 
-  const weeklyTrendData = Array.from(weeklySpendMap.values());
+  // ZEPH-FIX: week-over-week spend delta for trend badge (issue 5)
+  const {
+    weekSpendDeltaPct,
+    weekSpendDeltaAbs,
+  } = computeWeekSpendComparison(overviewRows ?? []);
 
   const quickAnalytics = [
     {
       label: "Budget health",
-      value: `${budgetUtilizationRate}% utilized`,
+      value: `${displayUtilization}% utilized`,
       icon: CircleDollarSign,
     },
     {
@@ -532,10 +517,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         <div className="relative z-10 flex flex-col gap-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-200/90">
+              <p className="text-fluid-eyebrow-strong text-sky-200/90">
                 Financial intelligence platform
               </p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-50 sm:text-4xl">
+              <h1 className="mt-2 text-fluid-hero font-semibold tracking-tight text-slate-50">
                 Welcome back to Zeph
               </h1>
               <p className="mt-3 text-sm leading-relaxed text-slate-400">
@@ -543,51 +528,151 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   weekday: "long",
                   day: "numeric",
                   month: "long",
+                  year: "numeric",
                 })}
                 {" \u2022 "}
                 {user.email}
               </p>
             </div>
-            <div className="inline-flex shrink-0 items-center gap-3 rounded-2xl border border-indigo-300/35 bg-slate-950/40 px-4 py-3">
+            {/* ZEPH-FIX: title shows full email on hover (issue 7); relative cap improves zoom resilience (issue 17) */}
+            <div className="inline-flex shrink-0 items-center gap-3 rounded-2xl border border-indigo-300/35 bg-slate-950/40 px-4 py-3 max-w-[14rem]" title={user.email ?? ""}>
               <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-indigo-500 text-sm font-semibold text-white">
                 {(user.email ?? "U").slice(0, 1).toUpperCase()}
               </div>
-              <div className="min-w-0 overflow-hidden">
-                <p className="text-xs text-slate-300">Active profile</p>
+              <div className="min-w-0">
+                <p className="truncate text-xs text-slate-300">Active profile</p>
                 <p className="truncate text-sm font-semibold text-slate-100">Personal workspace</p>
               </div>
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {/* ZEPH-FIX: full-width over-budget banner with pulsing border + role=alert + 44x44 CTA (issue 5, 14) */}
+          {isBudgetOverLimit && (
+            <div role="alert" className="over-budget-banner">
+              <span aria-hidden="true" className="text-lg">⚠️</span>
+              <span className="flex-1 min-w-0">
+                Over budget &mdash; {displayUtilization}% utilized this month.
+              </span>
+              <Link href="/budgets" className="over-budget-banner-fix" aria-label="Fix over-budget situation">
+                Fix →
+              </Link>
+            </div>
+          )}
+
+          {/* ZEPH-FIX: stat cards — auto-fit grid, never overflows regardless of viewport (uses .stat-cards-grid) */}
+          <div className="stat-cards-grid">
             <BalanceTargetCard
               initialValue={projectedIncome}
               isUserSet={balanceTarget !== null}
+              clearBalanceTarget={clearBalanceTarget}
               setBalanceTarget={setBalanceTarget}
             />
-            <article className="min-h-[5.5rem] rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
-              <p className="text-xs uppercase tracking-wide text-slate-400">Monthly spending</p>
-              <p className="mt-3 text-3xl font-bold text-slate-50">
+            <article className="min-h-[5.5rem] min-w-0 rounded-2xl border border-sky-400/40 bg-slate-950/35 p-5 ring-1 ring-sky-400/10">
+              <p className="text-fluid-eyebrow font-medium text-slate-300">Monthly spending</p>
+              <p className="mt-2 text-fluid-stat font-bold text-slate-50">
                 INR {monthSpend.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
               </p>
+              {weekSpendDeltaPct !== null && weekSpendDeltaAbs !== null && (
+                <p className={`mt-1 text-xs font-semibold ${weekSpendDeltaPct > 0 ? "text-rose-300" : "text-emerald-300"}`}>
+                  {weekSpendDeltaPct > 0 ? "↑" : "↓"} INR {weekSpendDeltaAbs.toLocaleString("en-IN")} ({Math.abs(weekSpendDeltaPct)}%) vs last week
+                </p>
+              )}
             </article>
-            <article className="min-h-[5.5rem] rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
-              <p className="text-xs uppercase tracking-wide text-slate-400">Savings progress</p>
-              <p className="mt-3 text-3xl font-bold text-emerald-300">{savingsProgressPct}%</p>
-            </article>
-            <article className="min-h-[5.5rem] rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
-              <p className="text-xs uppercase tracking-wide text-slate-400">Projected savings</p>
-              <p className="mt-3 text-3xl font-bold text-cyan-300">
-                INR {projectedSavings.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+            <article className="min-h-[5.5rem] min-w-0 rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
+              <p className="text-fluid-eyebrow font-medium text-slate-300">Savings progress</p>
+              <div className="mt-2 flex items-baseline justify-between gap-2">
+                <p className="text-fluid-stat font-bold text-emerald-300">{savingsProgressPct}%</p>
+                {/* ZEPH-FIX: percentage label + target-amount subline (issue 8) */}
+                <p className="text-xs font-semibold text-slate-400">of 100%</p>
+              </div>
+              <div
+                className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-700/60"
+                role="progressbar"
+                aria-valuenow={savingsProgressPct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`Savings progress: ${savingsProgressPct}%`}
+              >
+                <div
+                  className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                  style={{ width: `${Math.min(savingsProgressPct, 100)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-[0.7rem] text-slate-400">
+                Target: INR {projectedIncome.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
               </p>
             </article>
+            {/* ZEPH-FIX: projected savings links to goals, shows time horizon + trend vs target (issues 5, 9) */}
+            <Link href="/goals" className="block min-w-0 group" aria-label="View your savings goals">
+              <article className="min-h-[5.5rem] h-full rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5 transition-colors group-hover:border-sky-400/40">
+                <p className="text-fluid-eyebrow font-medium text-slate-300">Projected savings</p>
+                <p className="mt-2 text-fluid-stat font-bold text-cyan-300">
+                  INR {projectedSavings.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                </p>
+                {projectedIncome > 0 && (
+                  <p className={`mt-1 text-xs font-semibold ${projectedSavings >= projectedIncome * 0.2 ? "text-emerald-300" : "text-amber-300"}`}>
+                    {projectedSavings >= projectedIncome * 0.2 ? "↑" : "↓"} {Math.round((projectedSavings / projectedIncome) * 100)}% of target
+                  </p>
+                )}
+                <p className="mt-1 text-xs text-slate-400">{savingsHorizon}</p>
+              </article>
+            </Link>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {quickAnalytics.map((chip) => {
+          {/* ZEPH-FIX: budget health chip — CTA when no budget set, explicit over-budget label (issue 1, 6) */}
+          <div className="status-pill-row">
+            {noBudgetSetup ? (
+              <Link
+                href="/budgets/new"
+                className="premium-chip status-pill inline-flex items-center gap-2"
+              >
+                <CircleDollarSign aria-hidden="true" className="h-3.5 w-3.5" />
+                <span>Budget health</span>
+                <span className="text-amber-200">Add budget →</span>
+              </Link>
+            ) : (
+              <span
+                className={
+                  isBudgetOverLimit
+                    ? `${chipBase} status-pill border-rose-400/50 bg-rose-950/40 text-rose-100`
+                    : isBudgetNearLimit
+                    ? `${chipBase} status-pill border-amber-400/50 bg-amber-950/35 text-amber-100`
+                    : "premium-chip status-pill inline-flex items-center gap-2"
+                }
+              >
+                {isBudgetOverLimit && <span aria-label="Over budget" role="img">⚠️</span>}
+                <CircleDollarSign aria-hidden="true" className="h-3.5 w-3.5" />
+                <span>Budget health</span>
+                <span className={isBudgetOverLimit ? "text-rose-200" : isBudgetNearLimit ? "text-amber-200" : "text-sky-200"}>
+                  {isBudgetOverLimit ? `Over budget (${displayUtilization}%)` : `${displayUtilization}% utilized`}
+                </span>
+                {/* ZEPH-FIX: resolution CTA inside overflow chip (issue 18) */}
+                {isBudgetOverLimit && (
+                  <Link href="/budgets" className="ml-0.5 text-rose-300 underline underline-offset-2 hover:text-rose-200 font-semibold">
+                    → Fix
+                  </Link>
+                )}
+              </span>
+            )}
+            {/* ZEPH-FIX: AI coverage chip links to transactions (issue 14) */}
+            {quickAnalytics.filter((chip) => chip.label !== "Budget health").map((chip) => {
               const Icon = chip.icon;
+              if (chip.label === "AI coverage") {
+                return (
+                  <Link
+                    key={chip.label}
+                    href="/transactions"
+                    className="premium-chip status-pill inline-flex items-center gap-2"
+                    title={`${habitInsights.sampleSize} transactions auto-classified — click to review`}
+                  >
+                    <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+                    <span>{chip.label}</span>
+                    <span className="text-sky-200">{chip.value}</span>
+                  </Link>
+                );
+              }
               return (
-                <span key={chip.label} className="premium-chip inline-flex items-center gap-2">
+                <span key={chip.label} className="premium-chip status-pill inline-flex items-center gap-2">
                   <Icon aria-hidden="true" className="h-3.5 w-3.5" />
                   <span>{chip.label}</span>
                   <span className="text-sky-200">{chip.value}</span>
@@ -604,33 +689,61 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           Continue your workflow with high-signal controls and clean, focused navigation.
         </p>
 
-        <ol className="mt-5 grid gap-4 sm:grid-cols-3">
-          <li className="premium-action-card rounded-2xl p-5">
-            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-slate-300">Explore</p>
+        <ol className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 items-stretch">
+          {/* ZEPH-FIX: sentence-case labels, setup CTAs when no data (issues 2, 6, 11) */}
+          <li className="premium-action-card rounded-2xl p-5 flex flex-col">
+            <p className="text-fluid-eyebrow font-semibold text-slate-300">Explore</p>
             <Link className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 hover:text-cyan-100" href="/transactions">
               <Wallet aria-hidden="true" className="h-4 w-4" />
               Transaction history
               <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
             </Link>
             <p className="mt-2 text-xs text-slate-300">Review and refine transaction quality with full search.</p>
+            <Link href="/transactions" className="quick-action-cta text-cyan-300 hover:text-cyan-200">
+              <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
+              Open transactions →
+            </Link>
           </li>
-          <li className="premium-action-card rounded-2xl p-5">
-            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-slate-300">Optimize</p>
+          <li className="premium-action-card rounded-2xl p-5 flex flex-col">
+            <p className="text-fluid-eyebrow font-semibold text-slate-300">Optimize</p>
             <Link className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-indigo-200 hover:text-indigo-100" href="/budgets">
               <CircleDollarSign aria-hidden="true" className="h-4 w-4" />
               Budget control center
               <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
             </Link>
             <p className="mt-2 text-xs text-slate-300">Track utilization and detect risk before limits are breached.</p>
+            {dashboardBudgetList.length === 0 ? (
+              <Link href="/budgets/new" className="quick-action-cta text-amber-300 hover:text-amber-200">
+                <Sparkles aria-hidden="true" className="h-3 w-3" />
+                Set up your first budget →
+              </Link>
+            ) : (
+              <Link href="/budgets" className="quick-action-cta text-indigo-300 hover:text-indigo-200">
+                <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
+                Manage budgets →
+              </Link>
+            )}
           </li>
-          <li className="premium-action-card rounded-2xl p-5">
-            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-slate-300">Accelerate</p>
+          <li className="premium-action-card rounded-2xl p-5 flex flex-col">
+            <p className="text-fluid-eyebrow font-semibold text-slate-300">Accelerate</p>
             <Link className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-violet-200 hover:text-violet-100" href="/goals">
               <Flag aria-hidden="true" className="h-4 w-4" />
               Goals and milestones
               <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
             </Link>
             <p className="mt-2 text-xs text-slate-300">Maintain momentum and convert intent into measurable savings.</p>
+            {dashboardGoalProgress.length === 0 ? (
+              <Link href="/goals/new" className="quick-action-cta text-amber-300 hover:text-amber-200">
+                <Sparkles aria-hidden="true" className="h-3 w-3" />
+                Create your first goal →
+              </Link>
+            ) : (
+              // ZEPH-FIX: show "View goals" when goals already exist (issue 16)
+              <Link href="/goals" className="quick-action-cta text-violet-300 hover:text-violet-200">
+                <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
+                View your goals →
+              </Link>
+            )}
           </li>
         </ol>
       </section>
@@ -752,9 +865,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                           <div className="rounded-xl border border-slate-300/25 bg-slate-950/30 p-3 text-sm text-slate-200">
                             <p className="text-xs uppercase tracking-wide text-slate-400">Top spend categories</p>
                             <ul className="mt-2 space-y-2">
-                              {analysis.topCategories.length === 0 ? (
+                              {(analysis.topCategories ?? []).length === 0 ? (
                                 <li className="text-slate-400">No debit categories inferred yet.</li>
-                              ) : analysis.topCategories.map((row) => (
+                              ) : (analysis.topCategories ?? []).map((row) => (
                                 <li className="flex items-center justify-between gap-3" key={row.category}>
                                   <span>{row.category}</span>
                                   <span className="font-semibold text-slate-100">INR {row.amount.toFixed(0)}</span>
@@ -766,9 +879,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                           <div className="rounded-xl border border-slate-300/25 bg-slate-950/30 p-3 text-sm text-slate-200">
                             <p className="text-xs uppercase tracking-wide text-slate-400">Recurring payments</p>
                             <ul className="mt-2 space-y-2">
-                              {analysis.recurringPayments.length === 0 ? (
+                              {(analysis.recurringPayments ?? []).length === 0 ? (
                                 <li className="text-slate-400">No recurring payment pattern detected yet.</li>
-                              ) : analysis.recurringPayments.map((row) => (
+                              ) : (analysis.recurringPayments ?? []).map((row) => (
                                 <li key={`${row.description}-${row.amount}`}>
                                   <p className="font-medium text-slate-100">{row.description}</p>
                                   <p className="text-xs text-slate-300">{row.occurrences} occurrences • INR {row.amount.toFixed(0)}</p>
@@ -785,11 +898,11 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-wide text-rose-200">Risk indicators</p>
                             <ul className="mt-2 space-y-2 text-sm text-slate-200">
-                              {analysis.riskIndicators.length === 0 ? (
+                              {(analysis.riskIndicators ?? []).length === 0 ? (
                                 <li className="rounded-xl border border-emerald-300/30 bg-emerald-950/20 px-3 py-2 text-emerald-100">
                                   No immediate risk indicators were detected from this statement.
                                 </li>
-                              ) : analysis.riskIndicators.map((item) => (
+                              ) : (analysis.riskIndicators ?? []).map((item) => (
                                 <li className="rounded-xl border border-rose-300/30 bg-rose-950/20 px-3 py-2" key={item}>
                                   {item}
                                 </li>
@@ -800,7 +913,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-wide text-cyan-200">Recommendations</p>
                             <ul className="mt-2 space-y-2 text-sm text-slate-200">
-                              {analysis.recommendations.map((item) => (
+                              {(analysis.recommendations ?? []).map((item) => (
                                 <li className="rounded-xl border border-cyan-300/25 bg-cyan-950/20 px-3 py-2" key={item}>
                                   {item}
                                 </li>
@@ -885,8 +998,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </article>
 
           <article className="rounded-2xl border border-slate-700/60 bg-slate-950/35 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-400">Spending categories (current month)</p>
-            <SpendPieChart breakdown={pieBreakdown} wafflePalette={chartPalette} />
+            <p className="text-xs uppercase tracking-wide text-slate-400">{categoryChartLabel}</p>
+            <SpendPieChart breakdown={categoryChartBreakdown} wafflePalette={chartPalette} />
           </article>
         </div>
       </section>
@@ -1013,7 +1126,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 period === "this"
                   ? "border-cyan-400/65 bg-cyan-500/25 text-cyan-100"
                   : "border-slate-500/55 bg-slate-900/65 text-slate-300"
-              }`}
+              } touch-manipulation inline-flex min-h-10 items-center`}
               href={`/dashboard${queryString({ period: "this", categoryFocus })}`}
             >
               This week
@@ -1023,7 +1136,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 period === "last"
                   ? "border-cyan-400/65 bg-cyan-500/25 text-cyan-100"
                   : "border-slate-500/55 bg-slate-900/65 text-slate-300"
-              }`}
+              } touch-manipulation inline-flex min-h-10 items-center`}
               href={`/dashboard${queryString({ period: "last", categoryFocus })}`}
             >
               Last week
@@ -1049,7 +1162,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               {breakdown.map((row) => (
                 <li key={row.category}>
                   <Link
-                    className="flex items-center justify-between rounded-md border border-indigo-300/30 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 transition hover:bg-indigo-950/35"
+                    className="touch-manipulation flex min-h-10 items-center justify-between rounded-md border border-indigo-300/30 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 transition hover:bg-indigo-950/35"
                     href={`/dashboard${queryString({ period, categoryFocus: row.category })}`}
                   >
                     <span className="inline-flex items-center gap-2">
@@ -1191,6 +1304,31 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             ) : null}
           </>
         )}
+      </section>
+
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">Report export</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              Download user-scoped spending reports for the currently selected dashboard period.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a
+              className="inline-flex min-h-10 items-center rounded-md border border-cyan-300/40 bg-cyan-950/25 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-950/35"
+              href={`/api/reports/export?format=csv&period=${period}`}
+            >
+              Export CSV
+            </a>
+            <a
+              className="inline-flex min-h-10 items-center rounded-md border border-indigo-300/40 bg-indigo-950/25 px-3 py-2 text-xs font-semibold text-indigo-100 hover:bg-indigo-950/35"
+              href={`/api/reports/export?format=pdf&period=${period}`}
+            >
+              Export PDF
+            </a>
+          </div>
+        </div>
       </section>
 
       <section className="glass-card rounded-2xl p-6 sm:p-7">
@@ -1430,6 +1568,29 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 className="rounded-lg border border-amber-300/35 bg-slate-950/30 p-4"
                 key={transaction.id}
               >
+                {(() => {
+                  const status = getTransactionStatus({
+                    category: transaction.category,
+                    aiClassification: transaction.ai_classification,
+                    aiReviewState: transaction.ai_review_state,
+                  });
+                  const statusClasses = status === "flagged"
+                    ? "border-rose-300/45 bg-rose-950/35 text-rose-100"
+                    : status === "uncategorized"
+                      ? "border-amber-300/45 bg-amber-950/35 text-amber-100"
+                      : "border-emerald-300/45 bg-emerald-950/30 text-emerald-100";
+                  const label = status === "flagged"
+                    ? "Flagged"
+                    : status === "uncategorized"
+                      ? "Uncategorized"
+                      : "Categorized";
+
+                  return (
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-wide ${statusClasses}`}>
+                      {label}
+                    </span>
+                  );
+                })()}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-slate-100">
                     {transaction.merchant}
@@ -1449,6 +1610,24 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   {transaction.ai_reason ? ` • ${transaction.ai_reason}` : ""} • state=
                   {transaction.ai_review_state}
                 </p>
+
+                <details className="mt-2 rounded-lg border border-indigo-300/30 bg-slate-900/25 px-3 py-2">
+                  <summary className="cursor-pointer text-xs font-medium text-indigo-100">
+                    Original AI output (audit)
+                  </summary>
+                  <p className="mt-2 text-xs text-slate-300/85">
+                    Original label: {transaction.ai_raw_classification ?? "not recorded"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-300/85">
+                    Original reason: {transaction.ai_raw_reason ?? "not recorded"}
+                  </p>
+                  {transaction.ai_user_classification ? (
+                    <p className="mt-1 text-xs text-slate-300/85">
+                      User override: {transaction.ai_user_classification}
+                      {transaction.ai_user_reason ? ` • ${transaction.ai_user_reason}` : ""}
+                    </p>
+                  ) : null}
+                </details>
 
                 <form action={assignTransactionCategory} className="mt-3 flex flex-wrap items-center gap-2">
                   <input name="transactionId" type="hidden" value={transaction.id} />
@@ -1533,6 +1712,29 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           <ul className="mt-4 space-y-3">
             {transactionRows.map((transaction) => (
               <li className="rounded-lg border border-slate-300/30 bg-slate-950/30 p-4" key={transaction.id}>
+                {(() => {
+                  const status = getTransactionStatus({
+                    category: transaction.category,
+                    aiClassification: transaction.ai_classification,
+                    aiReviewState: transaction.ai_review_state,
+                  });
+                  const statusClasses = status === "flagged"
+                    ? "border-rose-300/45 bg-rose-950/35 text-rose-100"
+                    : status === "uncategorized"
+                      ? "border-amber-300/45 bg-amber-950/35 text-amber-100"
+                      : "border-emerald-300/45 bg-emerald-950/30 text-emerald-100";
+                  const label = status === "flagged"
+                    ? "Flagged"
+                    : status === "uncategorized"
+                      ? "Uncategorized"
+                      : "Categorized";
+
+                  return (
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-wide ${statusClasses}`}>
+                      {label}
+                    </span>
+                  );
+                })()}
                 <div className="flex items-center justify-between gap-3">
                   <label className="inline-flex items-center gap-2 text-sm text-slate-200">
                     <input

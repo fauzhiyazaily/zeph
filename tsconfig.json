@@ -19,8 +19,7 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"],
-      "@shared/ingestion": ["../shared/ingestion/index"]
+      "@/*": ["./src/*"]
     }
   },
   "include": [

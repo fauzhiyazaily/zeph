@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -16,7 +16,8 @@
     "test:governance:fingerprint": "vitest run src/lib/ingestion/fingerprint-collision.governance.test.ts",
     "governance:check-ingestion": "node scripts/check-ingestion-governance.mjs",
     "security:check": "node scripts/security-check.mjs",
-    "db:push": "npx --yes supabase db push"
+    "test:security": "vitest run src/lib/security/baseline.test.ts src/lib/security/next-config.test.ts && node scripts/security-check.mjs",
+    "db:push": "npx --yes supabase@2.101.0 db push"
   },
   "dependencies": {
     "@shared/ingestion": "file:../shared/ingestion",
@@ -31,6 +32,7 @@
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
     "server-only": "^0.0.1",
+    "unpdf": "^1.6.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

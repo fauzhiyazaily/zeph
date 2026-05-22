@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ChartColumnBig,
-  ChevronLeft,
-  ChevronRight,
   CircleDollarSign,
   Flag,
   LogOut,
   Menu,
+  MessageSquare,
   Settings,
   Wallet,
   X,
@@ -25,6 +24,7 @@ type AppShellProps = {
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", Icon: ChartColumnBig },
+  { href: "/chat", label: "Chat", Icon: MessageSquare },
   { href: "/transactions", label: "Transactions", Icon: Wallet },
   { href: "/budgets", label: "Budgets", Icon: CircleDollarSign },
   { href: "/goals", label: "Goals", Icon: Flag },
@@ -33,27 +33,26 @@ const navItems = [
 
 export function AppShell({ active, children }: AppShellProps) {
   const pathname = usePathname();
-  const [overlayOpen, setOverlayOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const overlayRef = useRef<HTMLElement>(null);
-
-  // Read persisted collapse preference after mount
-  useEffect(() => {
-    setMounted(true);
-    try {
-      if (localStorage.getItem("sidebar-collapsed") === "true") {
-        setCollapsed(true);
-      }
-    } catch {
-      // localStorage unavailable (SSR / private browsing) — use default
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false,
+  );
+  const [overlayOpenForPath, setOverlayOpenForPath] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
     }
-  }, []);
 
-  // Close overlay on route change
-  useEffect(() => {
-    setOverlayOpen(false);
-  }, [pathname]);
+    try {
+      return localStorage.getItem("sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const overlayRef = useRef<HTMLElement>(null);
+  const currentPath = pathname ?? "";
+  const overlayOpen = overlayOpenForPath === currentPath;
 
   // Trap focus within overlay sidebar when open
   useEffect(() => {
@@ -80,7 +79,7 @@ export function AppShell({ active, children }: AppShellProps) {
   };
 
   return (
-    <div className={`app-shell${collapsed && mounted ? " sidebar-collapsed" : ""}`}>
+    <div className={`app-shell overflow-x-hidden${collapsed && mounted ? " sidebar-collapsed" : ""}`}>
 
       {/* ════ Desktop sidebar (≥1024px) ════ */}
       <aside className="app-sidebar" aria-label="Primary navigation">
@@ -104,22 +103,12 @@ export function AppShell({ active, children }: AppShellProps) {
             type="button"
             className="app-sidebar-collapse-btn"
             onClick={toggleCollapse}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={(mounted && collapsed) ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={mounted ? !collapsed : undefined}
           >
-            {collapsed && mounted ? (
-              <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
+            <Menu className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-
-        {/* Theme toggle — hidden when collapsed */}
-        {(!collapsed || !mounted) && (
-          <div className="app-sidebar-theme-row">
-            <ThemeToggle className="app-sidebar-theme-toggle" />
-          </div>
-        )}
 
         {/* Nav links */}
         <nav className="app-sidebar-nav" aria-label="Main navigation">
@@ -129,17 +118,24 @@ export function AppShell({ active, children }: AppShellProps) {
               href={href}
               className={isActive(href) ? "app-sidebar-link active" : "app-sidebar-link"}
               aria-current={isActive(href) ? "page" : undefined}
+              aria-label={label}
               title={collapsed && mounted ? label : undefined}
+              // ZEPH-FIX: data-tooltip drives CSS floating label in collapsed mode (issue 3)
+              data-tooltip={collapsed && mounted ? label : undefined}
             >
               <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-              {(!collapsed || !mounted) && <span>{label}</span>}
+              {!(mounted && collapsed) && <span>{label}</span>}
             </Link>
           ))}
         </nav>
 
-        {/* Footer: theme icon (collapsed) + sign-out */}
+        {/* ZEPH-FIX: theme toggle always in footer for consistent placement in both states (issue 8) */}
         <div className="app-sidebar-footer">
-          {collapsed && mounted && (
+          {!(mounted && collapsed) ? (
+            <div className="app-sidebar-theme-row">
+              <ThemeToggle className="app-sidebar-theme-toggle" />
+            </div>
+          ) : (
             <div className="app-sidebar-theme-collapsed">
               <ThemeToggle className="app-sidebar-theme-icon" />
             </div>
@@ -149,9 +145,10 @@ export function AppShell({ active, children }: AppShellProps) {
               type="submit"
               className="app-sidebar-link app-sidebar-logout-btn"
               title={collapsed && mounted ? "Sign out" : undefined}
+              data-tooltip={collapsed && mounted ? "Sign out" : undefined}
             >
               <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
-              {(!collapsed || !mounted) && <span>Sign out</span>}
+              {!(mounted && collapsed) && <span>Sign out</span>}
             </button>
           </form>
         </div>
@@ -162,7 +159,7 @@ export function AppShell({ active, children }: AppShellProps) {
         <button
           type="button"
           className="app-topbar-hamburger"
-          onClick={() => setOverlayOpen(true)}
+          onClick={() => setOverlayOpenForPath(currentPath)}
           aria-label="Open navigation"
           aria-expanded={overlayOpen}
           aria-controls="app-overlay-sidebar"
@@ -183,7 +180,7 @@ export function AppShell({ active, children }: AppShellProps) {
         <>
           <div
             className="app-overlay-backdrop"
-            onClick={() => setOverlayOpen(false)}
+            onClick={() => setOverlayOpenForPath(null)}
             aria-hidden="true"
           />
           <nav
@@ -204,7 +201,7 @@ export function AppShell({ active, children }: AppShellProps) {
               <button
                 type="button"
                 className="app-overlay-close"
-                onClick={() => setOverlayOpen(false)}
+                onClick={() => setOverlayOpenForPath(null)}
                 aria-label="Close navigation"
               >
                 <X className="h-5 w-5" aria-hidden="true" />
@@ -222,7 +219,7 @@ export function AppShell({ active, children }: AppShellProps) {
                   href={href}
                   className={isActive(href) ? "app-sidebar-link active" : "app-sidebar-link"}
                   aria-current={isActive(href) ? "page" : undefined}
-                  onClick={() => setOverlayOpen(false)}
+                  onClick={() => setOverlayOpenForPath(null)}
                 >
                   <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                   <span>{label}</span>

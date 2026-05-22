@@ -1,3 +1,5 @@
+import * as sharedModule from '@shared/ingestion';
+
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 
 type CanonicalSourceType = string;
@@ -109,8 +111,7 @@ export type ReconciliationResult = {
   reconciled_at: string;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const shared = require('@shared/ingestion') as {
+const shared = sharedModule as unknown as {
   ALERT_SEVERITY: Readonly<{ INFO: 'info'; WARNING: 'warning'; CRITICAL: 'critical' }>;
   INGESTION_SCHEMA_VERSION: string;
   INGESTION_PIPELINE_VERSION: string;

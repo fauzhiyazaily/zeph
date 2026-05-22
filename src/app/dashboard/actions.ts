@@ -15,6 +15,7 @@ import { persistTransaction } from "@/lib/transactions/persistence";
 const VALID_SOURCES = new Set(["upi", "card", "wallet", "bank", "unknown"]);
 const VALID_CLASSIFICATIONS = new Set(["wise", "useless"]);
 const VALID_RECOMMENDATION_ACTIONS = new Set(["accepted", "dismissed"]);
+const MAX_BALANCE_TARGET = 9_999_999_999.99;
 
 function toRedirectParam(value: string) {
   return encodeURIComponent(value);
@@ -186,15 +187,16 @@ export async function createManualExpense(formData: FormData) {
 export async function assignTransactionCategory(formData: FormData) {
   enforceServerSecretPolicy();
 
+  const returnTo = parseReturnTo(formData);
   const transactionId = String(formData.get("transactionId") ?? "").trim();
   const category = parseCategory(formData);
 
   if (!transactionId) {
-    redirect("/dashboard?error=Missing%20transaction%20identifier.");
+    redirect(`${returnTo}?error=Missing%20transaction%20identifier.`);
   }
 
   if (!category) {
-    redirect("/dashboard?error=Category%20must%20be%202-40%20characters.");
+    redirect(`${returnTo}?error=Category%20must%20be%202-40%20characters.`);
   }
 
   const supabase = await createServerSupabaseClient();
@@ -213,25 +215,28 @@ export async function assignTransactionCategory(formData: FormData) {
     .eq("user_id", user.id);
 
   if (error) {
-    redirect("/dashboard?error=Failed%20to%20update%20category.");
+    redirect(`${returnTo}?error=Failed%20to%20update%20category.`);
   }
 
   revalidatePath("/dashboard");
-  redirect("/dashboard?message=Category%20updated.");
+  revalidatePath("/transactions");
+  revalidatePath("/budgets");
+  redirect(`${returnTo}?message=Category%20updated.`);
 }
 
 export async function bulkAssignTransactionCategory(formData: FormData) {
   enforceServerSecretPolicy();
 
+  const returnTo = parseReturnTo(formData);
   const category = parseCategory(formData);
   const selectedTransactionIds = parseSelectedTransactionIds(formData);
 
   if (!category) {
-    redirect("/dashboard?error=Bulk%20category%20must%20be%202-40%20characters.");
+    redirect(`${returnTo}?error=Bulk%20category%20must%20be%202-40%20characters.`);
   }
 
   if (selectedTransactionIds.length === 0) {
-    redirect("/dashboard?error=Select%20at%20least%20one%20transaction%20for%20bulk%20update.");
+    redirect(`${returnTo}?error=Select%20at%20least%20one%20transaction%20for%20bulk%20update.`);
   }
 
   const supabase = await createServerSupabaseClient();
@@ -251,14 +256,14 @@ export async function bulkAssignTransactionCategory(formData: FormData) {
     .returns<Array<{ id: string }>>();
 
   if (scopeError) {
-    redirect("/dashboard?error=Could%20not%20validate%20selection%20scope.%20Retry.");
+    redirect(`${returnTo}?error=Could%20not%20validate%20selection%20scope.%20Retry.`);
   }
 
   const scopedIds = (scopedRows ?? []).map((row) => row.id);
 
   if (scopedIds.length === 0) {
     redirect(
-      "/dashboard?error=No%20selected%20transactions%20belong%20to%20your%20account.%20Refresh%20and%20try%20again.",
+      `${returnTo}?error=No%20selected%20transactions%20belong%20to%20your%20account.%20Refresh%20and%20try%20again.`,
     );
   }
 
@@ -269,7 +274,7 @@ export async function bulkAssignTransactionCategory(formData: FormData) {
     .in("id", scopedIds);
 
   if (updateError) {
-    redirect("/dashboard?error=Bulk%20update%20failed.%20Retry%20in%20a%20moment.");
+    redirect(`${returnTo}?error=Bulk%20update%20failed.%20Retry%20in%20a%20moment.`);
   }
 
   const skippedCount = selectedTransactionIds.length - scopedIds.length;
@@ -286,21 +291,24 @@ export async function bulkAssignTransactionCategory(formData: FormData) {
   });
 
   revalidatePath("/dashboard");
+  revalidatePath("/transactions");
+  revalidatePath("/budgets");
 
   if (skippedCount > 0) {
     redirect(
-      `/dashboard?warning=${toRedirectParam(
+      `${returnTo}?warning=${toRedirectParam(
         `Updated ${scopedIds.length} transactions. ${skippedCount} skipped because they were unavailable or out of scope. Re-select and retry if needed.`,
       )}`,
     );
   }
 
-  redirect(`/dashboard?message=${toRedirectParam(`Updated ${scopedIds.length} transactions.`)}`);
+  redirect(`${returnTo}?message=${toRedirectParam(`Updated ${scopedIds.length} transactions.`)}`);
 }
 
 export async function editTransactionDetails(formData: FormData) {
   enforceServerSecretPolicy();
 
+  const returnTo = parseReturnTo(formData);
   const transactionId = String(formData.get("transactionId") ?? "").trim();
   const merchant = String(formData.get("merchant") ?? "").trim();
   const amountRaw = String(formData.get("amount") ?? "").trim();
@@ -310,30 +318,30 @@ export async function editTransactionDetails(formData: FormData) {
   const dateRaw = String(formData.get("date") ?? "").trim();
 
   if (!transactionId) {
-    redirect("/dashboard?error=Missing%20transaction%20identifier.");
+    redirect(`${returnTo}?error=Missing%20transaction%20identifier.`);
   }
 
   if (merchant.length < 2 || merchant.length > 120) {
-    redirect("/dashboard?error=Merchant%20must%20be%202-120%20characters.");
+    redirect(`${returnTo}?error=Merchant%20must%20be%202-120%20characters.`);
   }
 
   const amount = Number.parseFloat(amountRaw);
   if (!Number.isFinite(amount) || amount <= 0) {
-    redirect("/dashboard?error=Amount%20must%20be%20a%20positive%20number.");
+    redirect(`${returnTo}?error=Amount%20must%20be%20a%20positive%20number.`);
   }
 
   if (!VALID_SOURCES.has(source)) {
-    redirect("/dashboard?error=Source%20must%20be%20one%20of%20UPI%2C%20card%2C%20wallet%2C%20bank%2C%20unknown.");
+    redirect(`${returnTo}?error=Source%20must%20be%20one%20of%20UPI%2C%20card%2C%20wallet%2C%20bank%2C%20unknown.`);
   }
 
   const parsedDate = new Date(dateRaw);
   if (Number.isNaN(parsedDate.getTime())) {
-    redirect("/dashboard?error=Date%20must%20be%20valid.");
+    redirect(`${returnTo}?error=Date%20must%20be%20valid.`);
   }
 
   const category = categoryRaw.length === 0 ? null : categoryRaw;
   if (category && (category.length < 2 || category.length > 40)) {
-    redirect("/dashboard?error=Category%20must%20be%202-40%20characters%20when%20provided.");
+    redirect(`${returnTo}?error=Category%20must%20be%202-40%20characters%20when%20provided.`);
   }
 
   const reference = referenceRaw.length === 0 ? null : referenceRaw;
@@ -363,17 +371,19 @@ export async function editTransactionDetails(formData: FormData) {
     .returns<Array<{ id: string }>>();
 
   if (error) {
-    redirect("/dashboard?error=Failed%20to%20save%20transaction%20edits.%20Retry.");
+    redirect(`${returnTo}?error=Failed%20to%20save%20transaction%20edits.%20Retry.`);
   }
 
   if (!updatedRows || updatedRows.length === 0) {
     redirect(
-      "/dashboard?error=Transaction%20could%20not%20be%20updated.%20It%20may%20be%20out%20of%20scope%20or%20no%20longer%20available.",
+      `${returnTo}?error=Transaction%20could%20not%20be%20updated.%20It%20may%20be%20out%20of%20scope%20or%20no%20longer%20available.`,
     );
   }
 
   revalidatePath("/dashboard");
-  redirect("/dashboard?message=Transaction%20details%20updated.");
+  revalidatePath("/transactions");
+  revalidatePath("/budgets");
+  redirect(`${returnTo}?message=Transaction%20details%20updated.`);
 }
 
 export async function reviewTransactionClassification(formData: FormData) {
@@ -383,7 +393,7 @@ export async function reviewTransactionClassification(formData: FormData) {
   const decision = String(formData.get("decision") ?? "").trim().toLowerCase();
   const label = String(formData.get("label") ?? "").trim().toLowerCase();
   const reasonInput = String(formData.get("reason") ?? "").trim();
-  const returnTo = String(formData.get("returnTo") ?? "/transactions").trim();
+  const returnTo = parseReturnTo(formData, "/transactions");
 
   if (!transactionId) {
     redirect(`${returnTo}?error=Missing%20transaction%20identifier.`);
@@ -404,13 +414,15 @@ export async function reviewTransactionClassification(formData: FormData) {
 
   const { data: existingRow, error: fetchError } = await supabase
     .from("transactions")
-    .select("id,ai_classification,ai_reason")
+    .select("id,ai_classification,ai_reason,ai_raw_classification,ai_raw_reason")
     .eq("id", transactionId)
     .eq("user_id", user.id)
     .maybeSingle<{
       id: string;
       ai_classification: "wise" | "useless" | null;
       ai_reason: string | null;
+      ai_raw_classification: "wise" | "useless" | null;
+      ai_raw_reason: string | null;
     }>();
 
   if (fetchError || !existingRow) {
@@ -420,9 +432,18 @@ export async function reviewTransactionClassification(formData: FormData) {
   }
 
   if (decision === "accept") {
+    const acceptedLabel = existingRow.ai_raw_classification ?? existingRow.ai_classification;
+    const acceptedReason = existingRow.ai_raw_reason ?? existingRow.ai_reason;
+
+    if (!acceptedLabel || !acceptedReason) {
+      redirect(`${returnTo}?error=No%20AI%20classification%20is%20available%20to%20accept.`);
+    }
+
     const { error: acceptError } = await supabase
       .from("transactions")
       .update({
+        ai_classification: acceptedLabel,
+        ai_reason: acceptedReason,
         ai_user_classification: null,
         ai_user_reason: null,
         ai_review_state: "accepted",
@@ -434,6 +455,16 @@ export async function reviewTransactionClassification(formData: FormData) {
     if (acceptError) {
       redirect(`${returnTo}?error=Failed%20to%20save%20classification%20review.`);
     }
+
+    logAuditEvent({
+      event: "classification_accepted",
+      userId: user.id,
+      route: returnTo,
+      metadata: {
+        transactionId,
+        label: acceptedLabel,
+      },
+    });
 
     revalidatePath("/dashboard");
     revalidatePath("/transactions");
@@ -452,6 +483,8 @@ export async function reviewTransactionClassification(formData: FormData) {
   const { error: overrideError } = await supabase
     .from("transactions")
     .update({
+      ai_raw_classification: existingRow.ai_raw_classification ?? existingRow.ai_classification,
+      ai_raw_reason: existingRow.ai_raw_reason ?? existingRow.ai_reason,
       ai_user_classification: label,
       ai_user_reason: reason,
       ai_classification: label,
@@ -565,6 +598,7 @@ export async function deleteFinancialDocument(formData: FormData) {
 
   revalidatePath("/dashboard");
   revalidatePath("/transactions");
+  revalidatePath("/budgets");
   redirect(`${returnTo}?message=${toRedirectParam("Statement and linked processed data deleted.")}`);
 }
 
@@ -716,6 +750,7 @@ export async function retryFinancialDocumentProcessing(formData: FormData) {
   });
 
   revalidatePath("/dashboard");
+  revalidatePath("/budgets");
   revalidatePath(`/statements/${document.id}`);
   redirect(`${returnTo}?message=${toRedirectParam("Statement processing retried successfully.")}`);
 }
@@ -728,6 +763,10 @@ export async function setBalanceTarget(formData: FormData): Promise<{ error: str
 
   if (!raw || Number.isNaN(value) || !Number.isFinite(value) || value <= 0) {
     return { error: "Balance target must be a positive finite number." };
+  }
+
+  if (value > MAX_BALANCE_TARGET) {
+    return { error: "Balance target value is too large." };
   }
 
   const supabase = await createServerSupabaseClient();
@@ -751,6 +790,35 @@ export async function setBalanceTarget(formData: FormData): Promise<{ error: str
   if (dbError) {
     console.error("[setBalanceTarget] upsert failed:", dbError.message);
     return { error: "Failed to save balance target. Please try again." };
+  }
+
+  revalidatePath("/dashboard");
+  return { error: null };
+}
+
+export async function clearBalanceTarget(): Promise<{ error: string | null }> {
+  enforceServerSecretPolicy();
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Not authenticated." };
+  }
+
+  const { error: dbError } = await supabase
+    .from("user_income_preferences")
+    .update({
+      balance_target: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", user.id);
+
+  if (dbError) {
+    console.error("[clearBalanceTarget] update failed:", dbError.message);
+    return { error: "Failed to reset balance target. Please try again." };
   }
 
   revalidatePath("/dashboard");

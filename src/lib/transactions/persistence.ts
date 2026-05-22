@@ -108,22 +108,39 @@ export async function persistTransaction(
   supabase: SupabaseClient,
   input: PersistInput,
 ): Promise<PersistResult> {
-  const canonical = runIngestionPipeline(
-    {
-      merchant: input.parsed.merchant,
-      amount: input.parsed.amount,
-      date: input.parsed.timestamp,
-      reference: input.parsed.reference,
-      ingestion_batch_id: input.parsed.ingestion_batch_id,
-      ingested_at: input.parsed.ingested_at,
-    },
-    {
-      source_type: input.parsed.source,
-      source_version: input.parsed.source_version ?? "1.0.0",
-      ingestion_batch_id: input.parsed.ingestion_batch_id,
-      ingested_at: input.parsed.ingested_at,
-    },
-  );
+  const inputValidationError = validateParsedTransaction(input.parsed);
+  if (inputValidationError) {
+    return inputValidationError;
+  }
+
+  let canonical: ReturnType<typeof runIngestionPipeline>;
+  try {
+    canonical = runIngestionPipeline(
+      {
+        merchant: input.parsed.merchant,
+        amount: input.parsed.amount,
+        date: input.parsed.timestamp,
+        reference: input.parsed.reference,
+        ingestion_batch_id: input.parsed.ingestion_batch_id,
+        ingested_at: input.parsed.ingested_at,
+      },
+      {
+        source_type: input.parsed.source,
+        source_version: input.parsed.source_version ?? "1.0.0",
+        ingestion_batch_id: input.parsed.ingestion_batch_id,
+        ingested_at: input.parsed.ingested_at,
+      },
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Normalization pipeline failed.";
+    const isValidationFailure = /validation failed/i.test(reason);
+    return {
+      ok: false,
+      code: isValidationFailure ? "INVALID_PARSED_TRANSACTION" : "NORMALIZATION_FAILED",
+      reason,
+      retryable: !isValidationFailure,
+    };
+  }
 
   const canonicalParsed: PersistableParsedTransaction = {
     amount: canonical.normalized.amount,

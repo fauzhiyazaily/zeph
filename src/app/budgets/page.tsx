@@ -263,13 +263,9 @@ export default async function BudgetsPage({ searchParams }: BudgetsPageProps) {
         </h2>
         <form action={upsertBudget} className="mt-4 flex flex-col gap-4">
           <input type="hidden" name="returnTo" value="/budgets" />
-          {editBudget ? (
-            // When editing, hidden field carries the upsert key values
-            <>
-              <input type="hidden" name="category" value={editBudget.category} />
-              <input type="hidden" name="month" value={editBudget.month} />
-            </>
-          ) : null}
+          {editBudget ? <input type="hidden" name="budgetId" value={editBudget.id} /> : null}
+          {editBudget ? <input type="hidden" name="category" value={editBudget.category} /> : null}
+          {editBudget ? <input type="hidden" name="month" value={editBudget.month} /> : null}
 
           {!editBudget ? (
             <div className="flex flex-col gap-1">

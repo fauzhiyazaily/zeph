@@ -73,6 +73,7 @@ export default async function SignInPage(props: {
                 name="email"
                 autoComplete="email"
                 required
+                suppressHydrationWarning
               />
             </label>
 
@@ -84,12 +85,14 @@ export default async function SignInPage(props: {
                 name="password"
                 autoComplete="current-password"
                 required
+                suppressHydrationWarning
               />
             </label>
 
             <button
               className="mt-2 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 px-4 py-2.5 font-medium text-white shadow-[0_16px_30px_-18px_rgba(34,211,238,0.9)] hover:brightness-110"
               type="submit"
+              suppressHydrationWarning
             >
               Sign in
             </button>
@@ -99,6 +102,7 @@ export default async function SignInPage(props: {
             <button
               className="w-full rounded-xl border border-indigo-300/40 bg-slate-900/40 px-4 py-2.5 font-medium text-slate-100 hover:bg-slate-900/55"
               type="submit"
+              suppressHydrationWarning
             >
               Continue with Google
             </button>

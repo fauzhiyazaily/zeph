@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { signOut } from "@/app/(auth)/actions";
+import { ThemeToggle } from "./theme-toggle";
 import {
   ChartColumnBig,
   CircleDollarSign,
@@ -56,7 +57,8 @@ function NavIcon({ type }: { type: NavItem["icon"] }) {
 export function MobileFinanceNav({ active }: MobileFinanceNavProps) {
   return (
     <>
-      <details className="finance-mobile-sidebar lg:hidden">
+      {/* Tablet dropdown (640px–1023px) — visibility controlled via CSS */}
+      <details className="finance-mobile-sidebar">
         <summary className="finance-mobile-sidebar-trigger">
           <span className="inline-flex items-center gap-2">
             <Menu aria-hidden="true" className="h-4 w-4" />
@@ -70,6 +72,9 @@ export function MobileFinanceNav({ active }: MobileFinanceNavProps) {
               <p className="finance-brand-title">Zeph</p>
               <p className="finance-brand-subtitle">Financial intelligence</p>
             </div>
+          </div>
+          <div className="finance-sidebar-theme-row">
+            <ThemeToggle className="finance-sidebar-theme-toggle" />
           </div>
           <nav aria-label="Primary mobile navigation" className="finance-sidebar-nav">
             {navItems.map((item) => {
@@ -95,6 +100,27 @@ export function MobileFinanceNav({ active }: MobileFinanceNavProps) {
         </div>
       </details>
 
+      {/* Mobile bottom navigation bar (< 640px) — visibility controlled via CSS */}
+      <nav aria-label="Primary mobile navigation" className="finance-bottom-nav">
+        {navItems.map((item) => {
+          const isActive = item.href === active;
+          return (
+            <Link
+              key={`bottom-${item.href}`}
+              href={item.href}
+              className={isActive ? "finance-bottom-nav-link active" : "finance-bottom-nav-link"}
+              aria-current={isActive ? "page" : undefined}
+            >
+              <NavIcon type={item.icon} />
+              <span>{item.label}</span>
+            </Link>
+          );
+        })}
+        <div className="finance-bottom-nav-theme-slot">
+          <ThemeToggle className="finance-bottom-nav-theme-toggle" />
+        </div>
+      </nav>
+
       <aside aria-label="Primary desktop navigation" className="finance-sidebar">
         <div className="finance-sidebar-brand">
           <span className="finance-logo-mark">Z</span>
@@ -102,6 +128,10 @@ export function MobileFinanceNav({ active }: MobileFinanceNavProps) {
             <p className="finance-brand-title">Zeph</p>
             <p className="finance-brand-subtitle">Financial intelligence</p>
           </div>
+        </div>
+
+        <div className="finance-sidebar-theme-row">
+          <ThemeToggle className="finance-sidebar-theme-toggle" />
         </div>
 
         <nav className="finance-sidebar-nav">

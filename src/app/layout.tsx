@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Inter, Manrope } from "next/font/google";
+import { AppThemeProvider } from "./components/theme-provider";
 import "./globals.css";
 
 const inter = Inter({
@@ -22,6 +23,7 @@ export const metadata: Metadata = {
   description: "Personal finance cockpit with AI-guided spending decisions.",
 };
 
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -30,9 +32,14 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${inter.variable} ${manrope.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        <AppThemeProvider>
+          {children}
+        </AppThemeProvider>
+      </body>
     </html>
   );
 }

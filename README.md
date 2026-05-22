@@ -4,6 +4,8 @@ Zeph is a personal finance web app built with Next.js, Supabase, and AI-assisted
 
 It helps users ingest payment messages, categorize spending, review AI classification, and track behavior patterns through dashboard insights.
 
+All commands below assume you are in the `zeph/` project directory, not the monorepo root.
+
 ## Tech Stack
 
 - Next.js 16 (App Router)
@@ -27,7 +29,7 @@ It helps users ingest payment messages, categorize spending, review AI classific
 npm install
 ```
 
-2. Create `/.env.local` in the project root with your own keys.
+2. Create `.env.local` in the project root with your own keys.
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
@@ -36,10 +38,14 @@ SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
 ANTHROPIC_API_KEY=YOUR_ANTHROPIC_API_KEY
 ```
 
-3. Configure Supabase Auth URLs.
+Keep `SUPABASE_SERVICE_ROLE_KEY` server-only. Only the `NEXT_PUBLIC_...` values belong in browser-accessible code.
+
+3. Configure Supabase Auth URLs in the Supabase Dashboard.
 
 - Site URL: `http://localhost:3000`
 - Redirect URL: `http://localhost:3000/auth/callback`
+
+Set them in Supabase Dashboard → Authentication → URL Configuration.
 
 4. Start the development server.
 
@@ -48,6 +54,15 @@ npm run dev
 ```
 
 5. Open `http://localhost:3000`.
+
+6. Verify baseline quality gates.
+
+```bash
+npm run lint
+npm run test
+```
+
+`npm run test` opens Vitest in watch mode. For a one-shot run, use `npx vitest run`.
 
 ## Database Setup (Supabase Migrations)
 
@@ -61,6 +76,8 @@ npm run db:push
 
 Migrations are stored in `supabase/migrations`.
 
+`supabase login` opens a browser auth flow. For `supabase link`, use the project's Reference ID from Supabase Dashboard → Project Settings → General, not the full project URL.
+
 ## Available Scripts
 
 ```bash
@@ -68,10 +85,10 @@ npm run dev            # start local development server
 npm run build          # production build
 npm run start          # run production server
 npm run lint           # lint the codebase
-npm run test           # run unit tests
+npm run test           # run unit tests in watch mode
 npm run test:ui        # run Vitest UI
-npm run security:check # run security checks
-npm run db:push        # push Supabase migrations
+npm run security:check # validate env/secrets and runtime guardrails
+npm run db:push        # push Supabase migrations with Supabase CLI 2.101.0
 ```
 
 ## Core Features
@@ -88,6 +105,22 @@ npm run db:push        # push Supabase migrations
 - Never commit real secrets.
 - Keep all secrets in `/.env.local` (already ignored by git).
 - Do not expose server secrets with `NEXT_PUBLIC_` prefixes.
+- `SUPABASE_SERVICE_ROLE_KEY` is server-only: never import or reference it from client components, browser bundles, or public routes.
+- Use only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in browser-accessible code.
+
+## Troubleshooting
+
+- Missing env vars:
+  - Symptom: startup failures or runtime errors about missing Supabase/API configuration.
+  - Fix: confirm all required keys exist in `/.env.local`, then restart `npm run dev`.
+
+- Auth callback mismatch:
+  - Symptom: sign-in redirects fail or callback errors after auth provider login.
+  - Fix: ensure Supabase Auth Site URL is `http://localhost:3000` and Redirect URL is `http://localhost:3000/auth/callback`.
+
+- Invalid Supabase URL/key:
+  - Symptom: `401`/`403` responses, failed data fetches, or auth initialization errors.
+  - Fix: verify project ref and keys copied from the same Supabase project; rotate compromised keys and update `/.env.local`.
 
 ## Project Structure
 

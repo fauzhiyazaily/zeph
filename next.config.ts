@@ -1,6 +1,35 @@
+import path from "path";
 import type { NextConfig } from "next";
 
+const isDev = process.env.NODE_ENV !== "production";
+
+const scriptSrc = isDev
+  ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+  : "script-src 'self' 'unsafe-inline'";
+
+const connectSrc = isDev
+  ? "connect-src 'self' https: ws: wss:"
+  : "connect-src 'self' https:";
+
+const cspHeader = [
+  "default-src 'self'",
+  scriptSrc,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: https:",
+  "font-src 'self' data:",
+  connectSrc,
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
 const nextConfig: NextConfig = {
+  output: 'standalone',
+  serverExternalPackages: ["unpdf"],
+  outputFileTracingRoot: path.join(__dirname),
+  outputFileTracingIncludes: {
+    "/*": ["../shared/ingestion/**/*"],
+  },
   poweredByHeader: false,
   async headers() {
     return [
@@ -25,8 +54,7 @@ const nextConfig: NextConfig = {
           },
           {
             key: "Content-Security-Policy",
-            value:
-              "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+            value: cspHeader,
           },
           {
             key: "Permissions-Policy",

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { updateMessageReadingConsent } from "@/app/(auth)/actions";
+import { AppShell } from "@/app/components/app-shell";
 import { getMessageReadingConsent } from "@/lib/consent";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -31,7 +32,8 @@ export default async function ConsentOnboardingPage(props: {
   const consent = getMessageReadingConsent(user);
 
   return (
-    <main className="finance-shell mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-10">
+    <AppShell active="/settings/privacy">
+    <main className="app-content mx-auto w-full max-w-[1600px] flex flex-col gap-6 px-4 py-5 lg:px-6 lg:py-6">
       <header className="rounded-xl border border-slate-300/35 bg-slate-950/35 p-6 shadow-sm">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-100">
           Payment Message Permission
@@ -95,6 +97,8 @@ export default async function ConsentOnboardingPage(props: {
           </Link>
         </div>
       </section>
+
     </main>
+    </AppShell>
   );
 }

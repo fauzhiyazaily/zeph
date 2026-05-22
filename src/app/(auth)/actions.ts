@@ -7,6 +7,14 @@ import { buildUpdatedUserMetadata } from "@/lib/consent";
 import { enforceServerSecretPolicy } from "@/lib/security/baseline";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function toSafeInternalPath(pathLike: string, fallback: string) {
+  return /^\/(?!\/)/.test(pathLike) ? pathLike : fallback;
+}
+
 async function getOriginFromHeaders() {
   const headerStore = await headers();
   const origin = headerStore.get("origin");
@@ -31,6 +39,10 @@ export async function signInWithPassword(formData: FormData) {
     redirect("/sign-in?error=Email%20and%20password%20are%20required.");
   }
 
+  if (!isValidEmail(email)) {
+    redirect("/sign-in?error=Please%20enter%20a%20valid%20email%20address.");
+  }
+
   const supabase = await createServerSupabaseClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
@@ -39,7 +51,7 @@ export async function signInWithPassword(formData: FormData) {
     redirect(`/sign-in?error=${encodeURIComponent(message)}`);
   }
 
-  redirect(nextPath.startsWith("/") ? nextPath : "/dashboard");
+  redirect(toSafeInternalPath(nextPath, "/dashboard"));
 }
 
 export async function signUpWithPassword(formData: FormData) {
@@ -50,6 +62,14 @@ export async function signUpWithPassword(formData: FormData) {
 
   if (!email || !password) {
     redirect("/sign-up?error=Email%20and%20password%20are%20required.");
+  }
+
+  if (!isValidEmail(email)) {
+    redirect("/sign-up?error=Please%20enter%20a%20valid%20email%20address.");
+  }
+
+  if (password.length < 8 || !password.trim()) {
+    redirect("/sign-up?error=Password%20must%20be%20at%20least%208%20characters.");
   }
 
   const supabase = await createServerSupabaseClient();
@@ -107,6 +127,7 @@ export async function updateMessageReadingConsent(formData: FormData) {
 
   const granted = String(formData.get("granted") ?? "false") === "true";
   const returnTo = String(formData.get("returnTo") ?? "/dashboard");
+  const target = toSafeInternalPath(returnTo, "/dashboard");
 
   const supabase = await createServerSupabaseClient();
   const {
@@ -124,13 +145,12 @@ export async function updateMessageReadingConsent(formData: FormData) {
     const message = encodeURIComponent(
       "Could not update permission right now. Please try again.",
     );
-    redirect(`${returnTo}?error=${message}`);
+    redirect(`${target}?error=${message}`);
   }
 
   const message = granted
     ? "Payment message reading permission enabled."
     : "Payment message reading permission revoked.";
 
-  const target = returnTo.startsWith("/") ? returnTo : "/dashboard";
   redirect(`${target}?message=${encodeURIComponent(message)}`);
 }

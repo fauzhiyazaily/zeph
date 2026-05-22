@@ -4,23 +4,36 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:ui": "vitest --ui",
+    "test:governance": "vitest run -t @governance",
+    "test:governance:runtime": "vitest run src/lib/ingestion/governance-runtime.test.ts src/lib/ingestion/replay-resilience.test.ts",
+    "test:governance:contracts": "vitest run src/lib/ingestion/ingestion-contract.governance.test.ts src/lib/ingestion/reconciliation.governance.test.ts src/lib/transactions/persistence.governance.test.ts",
+    "test:governance:fingerprint": "vitest run src/lib/ingestion/fingerprint-collision.governance.test.ts",
+    "governance:check-ingestion": "node scripts/check-ingestion-governance.mjs",
     "security:check": "node scripts/security-check.mjs",
-    "db:push": "npx --yes supabase db push"
+    "test:security": "vitest run src/lib/security/baseline.test.ts src/lib/security/next-config.test.ts && node scripts/security-check.mjs",
+    "db:push": "npx --yes supabase@2.101.0 db push"
   },
   "dependencies": {
+    "@shared/ingestion": "file:../shared/ingestion",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.4",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.14.0",
     "next": "16.2.6",
+    "next-themes": "^0.4.6",
+    "pdf-parse": "^2.4.5",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "recharts": "^3.8.1"
+    "recharts": "^3.8.1",
+    "server-only": "^0.0.1",
+    "unpdf": "^1.6.2",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -30,6 +43,7 @@
     "@vitest/ui": "^4.1.5",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "playwright": "^1.60.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.5"

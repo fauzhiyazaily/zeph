@@ -38,8 +38,21 @@ export function validateGoalInput(input: {
     return "Deadline must be a valid date in YYYY-MM-DD format.";
   }
 
+  const [yearText, monthText, dayText] = deadlineText.split("-");
+  const year = Number.parseInt(yearText ?? "", 10);
+  const month = Number.parseInt(monthText ?? "", 10);
+  const day = Number.parseInt(dayText ?? "", 10);
+
   const deadline = new Date(`${deadlineText}T00:00:00.000Z`);
   if (Number.isNaN(deadline.getTime())) {
+    return "Deadline must be a valid date.";
+  }
+
+  if (
+    deadline.getUTCFullYear() !== year
+    || deadline.getUTCMonth() + 1 !== month
+    || deadline.getUTCDate() !== day
+  ) {
     return "Deadline must be a valid date.";
   }
 

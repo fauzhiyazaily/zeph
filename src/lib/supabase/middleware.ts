@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const protectedPaths = ["/dashboard", "/onboarding", "/settings", "/goals"];
+const protectedPaths = ["/dashboard", "/chat", "/onboarding", "/settings", "/goals"];
 const authPaths = ["/sign-in", "/sign-up"];
 
 function matchesPath(pathname: string, paths: string[]) {

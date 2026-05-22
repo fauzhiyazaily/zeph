@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
+  assignTransactionCategory,
   createManualExpense,
   reviewTransactionClassification,
 } from "@/app/dashboard/actions";
-import { MobileFinanceNav } from "@/app/components/mobile-finance-nav";
+import { AppShell } from "@/app/components/app-shell";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +38,7 @@ type PageProps = {
     message?: string;
     error?: string;
     warning?: string;
+    uncategorized?: string;
   }>;
 };
 
@@ -126,6 +128,7 @@ function queryString(input: {
   category?: string;
   from?: string;
   to?: string;
+  uncategorized?: string;
 }) {
   const params = new URLSearchParams();
   if (input.page && input.page > 1) params.set("page", String(input.page));
@@ -134,6 +137,7 @@ function queryString(input: {
   if (input.category) params.set("category", input.category);
   if (input.from) params.set("from", input.from);
   if (input.to) params.set("to", input.to);
+  if (input.uncategorized) params.set("uncategorized", input.uncategorized);
   const rendered = params.toString();
   return rendered ? `?${rendered}` : "";
 }
@@ -149,6 +153,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
   const message = (params.message ?? "").trim();
   const errorMessage = (params.error ?? "").trim();
   const warning = (params.warning ?? "").trim();
+  const uncategorizedOnly = params.uncategorized === "1";
 
   const supabase = await createServerSupabaseClient();
   const {
@@ -161,6 +166,19 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
 
   const start = (page - 1) * PAGE_SIZE;
   const end = start + PAGE_SIZE - 1;
+
+  const { data: uncategorizedQueue, error: uncategorizedQueueError } = await supabase
+    .from("transactions")
+    .select(
+      "id,amount,merchant,source,reference,date,category,ai_classification,ai_reason,ai_raw_classification,ai_raw_reason,ai_user_classification,ai_user_reason,ai_review_state",
+    )
+    .eq("user_id", user.id)
+    .or("category.is.null,category.eq.")
+    .order("date", { ascending: false })
+    .limit(6)
+    .returns<TransactionRow[]>();
+
+  const uncategorizedQueueRows = uncategorizedQueue ?? [];
 
   let query = supabase
     .from("transactions")
@@ -182,7 +200,9 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
     query = query.eq("source", source);
   }
 
-  if (category) {
+  if (uncategorizedOnly) {
+    query = query.or("category.is.null,category.eq.");
+  } else if (category) {
     query = query.ilike("category", category);
   }
 
@@ -210,7 +230,8 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
   const hasNext = page < totalPages;
 
   return (
-    <main className="finance-shell mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 px-5 py-8 sm:px-6 sm:py-10">
+    <AppShell active="/transactions">
+    <main className="app-content mx-auto w-full max-w-[1600px] flex flex-col gap-6 px-4 py-5 lg:px-6 lg:py-6">
       <header className="rounded-xl border border-slate-300/35 bg-slate-950/35 p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -226,7 +247,89 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
           </Link>
         </div>
 
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <span className="rounded-full border border-amber-300/45 bg-amber-950/35 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-100">
+            {uncategorizedQueueRows.length} uncategorized pending
+          </span>
+          <Link
+            className="text-xs font-medium text-cyan-200 underline hover:text-cyan-100"
+            href={`/transactions${queryString({ q, source, from, to, uncategorized: uncategorizedOnly ? undefined : "1" })}`}
+          >
+            {uncategorizedOnly ? "Viewing uncategorized only" : "Show uncategorized only"}
+          </Link>
+          {uncategorizedOnly ? (
+            <Link
+              className="text-xs font-medium text-cyan-200 underline hover:text-cyan-100"
+              href={`/transactions${queryString({ q, source, category, from, to })}`}
+            >
+              Clear uncategorized filter
+            </Link>
+          ) : null}
+        </div>
+
+        {uncategorizedQueueError ? (
+          <p className="mt-4 rounded-md border border-rose-300/40 bg-rose-950/35 px-3 py-2 text-sm text-rose-100">
+            Could not load uncategorized queue right now.
+          </p>
+        ) : uncategorizedQueueRows.length > 0 ? (
+          <div className="mt-4 rounded-xl border border-amber-300/35 bg-slate-950/30 p-4">
+            <p className="text-sm font-semibold text-amber-100">Uncategorized queue</p>
+            <p className="mt-1 text-xs text-slate-300">
+              Assign categories quickly to keep dashboards and reports accurate.
+            </p>
+            <ul className="mt-3 space-y-2">
+              {uncategorizedQueueRows.map((row) => (
+                <li className="rounded-lg border border-amber-300/30 bg-slate-900/30 p-3" key={`uncategorized-${row.id}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-100">{row.merchant}</p>
+                    <p className="text-sm font-semibold text-slate-100">INR {row.amount.toFixed(2)}</p>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-300/85">
+                    {new Date(row.date).toLocaleString()} • {row.source.toUpperCase()}
+                    {row.reference ? ` • Ref ${row.reference}` : ""}
+                  </p>
+                  <form action={assignTransactionCategory} className="mt-2 flex flex-wrap items-center gap-2">
+                    <input name="transactionId" type="hidden" value={row.id} />
+                    <input name="returnTo" type="hidden" value="/transactions" />
+                    <input
+                      className="min-w-44 flex-1 rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-xs text-slate-100 placeholder:text-slate-400"
+                      list={`uncategorized-queue-category-${row.id}`}
+                      maxLength={40}
+                      minLength={2}
+                      name="category"
+                      placeholder="Assign category"
+                      required
+                    />
+                    <datalist id={`uncategorized-queue-category-${row.id}`}>
+                      <option value="Food" />
+                      <option value="Transport" />
+                      <option value="Groceries" />
+                      <option value="Bills" />
+                      <option value="Shopping" />
+                      <option value="Health" />
+                      <option value="Entertainment" />
+                      <option value="Other" />
+                    </datalist>
+                    <button
+                      className="rounded-md border border-amber-300/45 bg-amber-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-amber-700"
+                      type="submit"
+                    >
+                      Save
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="mt-4 rounded-md border border-emerald-300/35 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-100">
+            All transactions are categorized.
+          </p>
+        )}
+
         <form className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" method="get">
+          {uncategorizedOnly ? <input name="uncategorized" type="hidden" value="1" /> : null}
+
           <label className="sr-only" htmlFor="filter-search">Search merchant or reference</label>
           <input
             className="rounded-md border border-slate-400/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400"
@@ -510,6 +613,39 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
                       </button>
                     </div>
                   </form>
+
+                  <form action={assignTransactionCategory} className="grid gap-2 sm:grid-cols-3">
+                    <input name="transactionId" type="hidden" value={row.id} />
+                    <input name="returnTo" type="hidden" value="/transactions" />
+                    <input
+                      className="rounded-md border border-slate-400/35 bg-slate-950/30 px-2 py-1.5 text-xs text-slate-100 sm:col-span-2"
+                      defaultValue={row.category ?? ""}
+                      list={`transactions-category-suggestions-${row.id}`}
+                      maxLength={40}
+                      minLength={2}
+                      name="category"
+                      placeholder="Assign category"
+                      required
+                    />
+                    <datalist id={`transactions-category-suggestions-${row.id}`}>
+                      <option value="Food" />
+                      <option value="Transport" />
+                      <option value="Groceries" />
+                      <option value="Bills" />
+                      <option value="Shopping" />
+                      <option value="Health" />
+                      <option value="Entertainment" />
+                      <option value="Other" />
+                    </datalist>
+                    <div className="sm:col-span-3">
+                      <button
+                        className="rounded-md border border-amber-300/45 bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:bg-amber-500/30"
+                        type="submit"
+                      >
+                        Save category
+                      </button>
+                    </div>
+                  </form>
                 </div>
               </li>
             ))}
@@ -520,7 +656,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
           {hasPrev ? (
             <Link
               className="rounded-md border border-slate-400/35 bg-slate-950/25 px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-slate-900/55"
-              href={`/transactions${queryString({ page: page - 1, q, source, category, from, to })}`}
+              href={`/transactions${queryString({ page: page - 1, q, source, category, from, to, uncategorized: uncategorizedOnly ? "1" : undefined })}`}
             >
               Previous
             </Link>
@@ -533,7 +669,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
           {hasNext ? (
             <Link
               className="rounded-md border border-slate-400/35 bg-slate-950/25 px-3 py-2 text-sm font-medium text-slate-100 transition hover:bg-slate-900/55"
-              href={`/transactions${queryString({ page: page + 1, q, source, category, from, to })}`}
+              href={`/transactions${queryString({ page: page + 1, q, source, category, from, to, uncategorized: uncategorizedOnly ? "1" : undefined })}`}
             >
               Next
             </Link>
@@ -545,7 +681,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
         </nav>
       </section>
 
-      <MobileFinanceNav active="/transactions" />
     </main>
+    </AppShell>
   );
 }

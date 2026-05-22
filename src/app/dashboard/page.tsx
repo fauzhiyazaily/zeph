@@ -4,10 +4,15 @@ import {
   assignTransactionCategory,
   bulkAssignTransactionCategory,
   createManualExpense,
+  deleteFinancialDocument,
   editTransactionDetails,
   saveRecommendationAction,
+  clearBalanceTarget,
+  setBalanceTarget,
 } from "@/app/dashboard/actions";
-import { MobileFinanceNav } from "@/app/components/mobile-finance-nav";
+import { BalanceTargetCard } from "@/app/dashboard/balance-target-card";
+import { BankStatementUpload } from "@/app/dashboard/bank-statement-upload";
+import { AppShell } from "@/app/components/app-shell";
 import { SpendPieChart } from "@/app/dashboard/spend-pie-chart";
 import { DashboardStatusBanner } from "@/app/dashboard/status-banner";
 import { WeeklyExpenseChart } from "@/app/dashboard/weekly-expense-chart";
@@ -33,13 +38,20 @@ import {
   buildHabitTrendInsights,
   type ClassifiedTransaction,
 } from "@/lib/insights/habit-trends";
+import {
+  buildWeeklyTrendData,
+  computeWeekSpendComparison,
+} from "@/lib/insights/overview-summary";
+import { getTransactionStatus } from "@/lib/insights/transaction-status";
 import { type Goal } from "@/lib/goals/goal-helpers";
 import {
   evaluateGoalMilestones,
   type GoalMilestoneRow,
 } from "@/lib/goals/milestones";
 import { computeGoalProgress, summarizeGoalProgress } from "@/lib/goals/progress";
+import type { BankStatementAnalysis } from "@/lib/ingestion/bank-statement-types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getBalanceTarget } from "@/lib/user/income-preferences";
 import { ArrowUpRight, Bolt, Brain, CircleDollarSign, Flag, Sparkles, Wallet } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -79,6 +91,27 @@ type FocusedRecommendationRow = {
   category: string | null;
   ai_classification: "wise" | "useless" | null;
   ai_reason: string | null;
+};
+
+type FinancialDocumentDashboardRow = {
+  id: string;
+  file_name: string;
+  parse_status: "processing" | "completed" | "failed";
+  parse_error: string | null;
+  bank_name: string | null;
+  account_holder_name: string | null;
+  account_number_masked: string | null;
+  statement_period_start: string | null;
+  statement_period_end: string | null;
+  transaction_count: number;
+  imported_debit_count: number;
+  total_credits: number;
+  total_debits: number;
+  opening_balance: number | null;
+  closing_balance: number | null;
+  processed_at: string | null;
+  created_at: string;
+  extracted_summary: BankStatementAnalysis | null;
 };
 
 const suggestedCategories = [
@@ -121,6 +154,8 @@ type DashboardPageProps = {
   searchParams: Promise<{
     period?: string;
     categoryFocus?: string;
+    message?: string;
+    error?: string;
   }>;
 };
 
@@ -136,6 +171,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const params = await searchParams;
   const period = params.period === "last" ? "last" : "this";
   const categoryFocus = (params.categoryFocus ?? "").trim();
+  const feedbackMessage = (params.message ?? "").trim();
+  const feedbackError = (params.error ?? "").trim();
 
   const supabase = await createServerSupabaseClient();
   const {
@@ -146,7 +183,19 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     redirect("/sign-in");
   }
 
+  const balanceTarget = await getBalanceTarget(supabase, user.id);
+
   const consent = getMessageReadingConsent(user);
+  const { data: financialDocuments, error: financialDocumentsError } = await supabase
+    .from("financial_documents")
+    .select(
+      "id,file_name,parse_status,parse_error,bank_name,account_holder_name,account_number_masked,statement_period_start,statement_period_end,transaction_count,imported_debit_count,total_credits,total_debits,opening_balance,closing_balance,processed_at,created_at,extracted_summary",
+    )
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(3)
+    .returns<FinancialDocumentDashboardRow[]>();
+
   const { data: uncategorized, error: queueError } = await supabase
     .from("transactions")
     .select(
@@ -249,23 +298,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
   const breakdown = buildCategoryBreakdown(chartRows, chartWindowStart, chartWindowEnd);
   const totalPeriodSpend = breakdown.reduce((sum, row) => sum + row.amount, 0);
-
-  const pieMonth = currentMonthKey();
-  const pieMonthRange = monthBoundsFromKey(pieMonth);
-  const { data: pieRows } = await supabase
-    .from("transactions")
-    .select("amount,category,date")
-    .eq("user_id", user.id)
-    .gte("date", pieMonthRange.start.toISOString())
-    .lt("date", pieMonthRange.end.toISOString())
-    .returns<SpendRecord[]>();
-
-  const pieBreakdownCurrentMonth = buildCategoryBreakdown(
-    pieRows ?? [],
-    pieMonthRange.start,
-    pieMonthRange.end,
-  );
-  const pieBreakdown = pieBreakdownCurrentMonth.length > 0 ? pieBreakdownCurrentMonth : breakdown;
+  const categoryChartBreakdown = breakdown;
+  const categoryChartLabel = period === "last"
+    ? "Spending categories (last week)"
+    : "Spending categories (this week)";
 
   let focusedRecommendationRows: FocusedRecommendationRow[] = [];
   let focusedRecommendationError: string | null = null;
@@ -367,6 +403,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const dashboardGoalProgress = (dashboardGoals ?? []).map((goal) => computeGoalProgress(goal));
   const dashboardGoalSummary = summarizeGoalProgress(dashboardGoalProgress);
 
+  // ZEPH-FIX: savings time horizon from nearest goal deadline (issue 5)
+  const nearestDeadlineGoal = (dashboardGoals ?? []).find((g) => g.deadline);
+  const savingsHorizon = nearestDeadlineGoal?.deadline
+    ? new Date(nearestDeadlineGoal.deadline).toLocaleDateString("en-IN", { month: "short", year: "numeric" })
+    : "this month";
+
   await evaluateGoalMilestones({
     supabase,
     userId: user.id,
@@ -416,45 +458,31 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const budgetUtilizationRate = monthBudgetLimitTotal > 0
     ? Math.round((monthSpend / monthBudgetLimitTotal) * 100)
     : 0;
-  const projectedIncome = Math.max(monthSpend * 1.25, monthBudgetLimitTotal * 1.08, 12000);
+  const displayUtilization = Math.min(budgetUtilizationRate, 999);
+  const projectedIncome = balanceTarget ?? Math.max(monthSpend * 1.25, monthBudgetLimitTotal * 1.08, 1);
   const projectedSavings = Math.max(projectedIncome - monthSpend, 0);
   const savingsProgressPct = projectedIncome > 0
     ? Math.round((projectedSavings / projectedIncome) * 100)
     : 0;
 
-  const weeklySpendMap = new Map<string, { day: string; amount: number }>();
-  const trendWindowEnd = chartWindowEnd;
-  const trendWindowStart = new Date(trendWindowEnd);
-  trendWindowStart.setUTCDate(trendWindowStart.getUTCDate() - 7);
-  for (let i = 0; i < 7; i += 1) {
-    const date = new Date(trendWindowStart);
-    date.setUTCDate(date.getUTCDate() + i);
-    const key = date.toISOString().slice(0, 10);
-    weeklySpendMap.set(key, {
-      day: date.toLocaleDateString("en-IN", { weekday: "short" }),
-      amount: 0,
-    });
-  }
+  const weeklyTrendData = buildWeeklyTrendData(chartRows, chartWindowEnd);
 
-  chartRows.forEach((row) => {
-    const date = new Date(row.date);
-    if (date < trendWindowStart || date >= trendWindowEnd) {
-      return;
-    }
-    const key = date.toISOString().slice(0, 10);
-    const existing = weeklySpendMap.get(key);
-    if (!existing) {
-      return;
-    }
-    existing.amount += Number(row.amount);
-  });
+  // ZEPH-FIX: budget state flags (issues 1, 2)
+  const noBudgetSetup = dashboardBudgetList.length === 0;
+  const chipBase = "inline-flex items-center gap-2 rounded-full border text-[0.72rem] font-semibold py-[0.35rem] px-[0.7rem]";
+  const isBudgetOverLimit = !noBudgetSetup && budgetUtilizationRate > 100;
+  const isBudgetNearLimit = !noBudgetSetup && budgetUtilizationRate >= 80 && budgetUtilizationRate <= 100;
 
-  const weeklyTrendData = Array.from(weeklySpendMap.values());
+  // ZEPH-FIX: week-over-week spend delta for trend badge (issue 5)
+  const {
+    weekSpendDeltaPct,
+    weekSpendDeltaAbs,
+  } = computeWeekSpendComparison(overviewRows ?? []);
 
   const quickAnalytics = [
     {
       label: "Budget health",
-      value: `${budgetUtilizationRate}% utilized`,
+      value: `${displayUtilization}% utilized`,
       icon: CircleDollarSign,
     },
     {
@@ -470,70 +498,181 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   ];
 
   return (
-    <main className="finance-shell soft-fade-in relative mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-7 px-5 py-8 sm:px-8 sm:py-10 lg:gap-8">
+    <AppShell active="/dashboard">
+    <main className="app-content soft-fade-in relative mx-auto w-full max-w-[1600px] flex flex-col gap-7 px-4 py-5 lg:px-6 lg:py-6">
       <DashboardStatusBanner />
+
+      {feedbackMessage ? (
+        <p className="rounded-xl border border-emerald-300/40 bg-emerald-950/35 px-4 py-3 text-sm text-emerald-100">
+          {feedbackMessage}
+        </p>
+      ) : null}
+      {feedbackError ? (
+        <p className="rounded-xl border border-rose-300/40 bg-rose-950/35 px-4 py-3 text-sm text-rose-100">
+          {feedbackError}
+        </p>
+      ) : null}
 
       <header className="glass-card premium-hero rounded-2xl p-6 sm:p-7">
         <div className="relative z-10 flex flex-col gap-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-200/90">
+              <p className="text-fluid-eyebrow-strong text-sky-200/90">
                 Financial intelligence platform
               </p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-50 sm:text-4xl">
+              <h1 className="mt-2 text-fluid-hero font-semibold tracking-tight text-slate-50">
                 Welcome back to Zeph
               </h1>
-              <p className="mt-2 text-sm text-slate-300">
+              <p className="mt-3 text-sm leading-relaxed text-slate-400">
                 {new Date().toLocaleDateString("en-IN", {
                   weekday: "long",
                   day: "numeric",
                   month: "long",
+                  year: "numeric",
                 })}
                 {" \u2022 "}
                 {user.email}
               </p>
             </div>
-            <div className="inline-flex items-center gap-3 rounded-2xl border border-indigo-300/35 bg-slate-950/40 px-4 py-3">
-              <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-indigo-500 text-sm font-semibold text-white">
+            {/* ZEPH-FIX: title shows full email on hover (issue 7); relative cap improves zoom resilience (issue 17) */}
+            <div className="inline-flex shrink-0 items-center gap-3 rounded-2xl border border-indigo-300/35 bg-slate-950/40 px-4 py-3 max-w-[14rem]" title={user.email ?? ""}>
+              <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-indigo-500 text-sm font-semibold text-white">
                 {(user.email ?? "U").slice(0, 1).toUpperCase()}
               </div>
-              <div>
-                <p className="text-xs text-slate-300">Active profile</p>
-                <p className="text-sm font-semibold text-slate-100">Personal workspace</p>
+              <div className="min-w-0">
+                <p className="truncate text-xs text-slate-300">Active profile</p>
+                <p className="truncate text-sm font-semibold text-slate-100">Personal workspace</p>
               </div>
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-300">Current balance target</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-50">
-                INR {projectedIncome.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
-              </p>
-            </article>
-            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-300">Monthly spending</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-50">
+          {/* ZEPH-FIX: full-width over-budget banner with pulsing border + role=alert + 44x44 CTA (issue 5, 14) */}
+          {isBudgetOverLimit && (
+            <div role="alert" className="over-budget-banner">
+              <span aria-hidden="true" className="text-lg">⚠️</span>
+              <span className="flex-1 min-w-0">
+                Over budget &mdash; {displayUtilization}% utilized this month.
+              </span>
+              <Link href="/budgets" className="over-budget-banner-fix" aria-label="Fix over-budget situation">
+                Fix →
+              </Link>
+            </div>
+          )}
+
+          {/* ZEPH-FIX: stat cards — auto-fit grid, never overflows regardless of viewport (uses .stat-cards-grid) */}
+          <div className="stat-cards-grid">
+            <BalanceTargetCard
+              initialValue={projectedIncome}
+              isUserSet={balanceTarget !== null}
+              clearBalanceTarget={clearBalanceTarget}
+              setBalanceTarget={setBalanceTarget}
+            />
+            <article className="min-h-[5.5rem] min-w-0 rounded-2xl border border-sky-400/40 bg-slate-950/35 p-5 ring-1 ring-sky-400/10">
+              <p className="text-fluid-eyebrow font-medium text-slate-300">Monthly spending</p>
+              <p className="mt-2 text-fluid-stat font-bold text-slate-50">
                 INR {monthSpend.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
               </p>
+              {weekSpendDeltaPct !== null && weekSpendDeltaAbs !== null && (
+                <p className={`mt-1 text-xs font-semibold ${weekSpendDeltaPct > 0 ? "text-rose-300" : "text-emerald-300"}`}>
+                  {weekSpendDeltaPct > 0 ? "↑" : "↓"} INR {weekSpendDeltaAbs.toLocaleString("en-IN")} ({Math.abs(weekSpendDeltaPct)}%) vs last week
+                </p>
+              )}
             </article>
-            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-300">Savings progress</p>
-              <p className="mt-2 text-2xl font-semibold text-emerald-300">{savingsProgressPct}%</p>
-            </article>
-            <article className="rounded-2xl border border-slate-700/70 bg-slate-950/35 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-300">Projected savings</p>
-              <p className="mt-2 text-2xl font-semibold text-cyan-300">
-                INR {projectedSavings.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+            <article className="min-h-[5.5rem] min-w-0 rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5">
+              <p className="text-fluid-eyebrow font-medium text-slate-300">Savings progress</p>
+              <div className="mt-2 flex items-baseline justify-between gap-2">
+                <p className="text-fluid-stat font-bold text-emerald-300">{savingsProgressPct}%</p>
+                {/* ZEPH-FIX: percentage label + target-amount subline (issue 8) */}
+                <p className="text-xs font-semibold text-slate-400">of 100%</p>
+              </div>
+              <div
+                className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-700/60"
+                role="progressbar"
+                aria-valuenow={savingsProgressPct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`Savings progress: ${savingsProgressPct}%`}
+              >
+                <div
+                  className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                  style={{ width: `${Math.min(savingsProgressPct, 100)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-[0.7rem] text-slate-400">
+                Target: INR {projectedIncome.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
               </p>
             </article>
+            {/* ZEPH-FIX: projected savings links to goals, shows time horizon + trend vs target (issues 5, 9) */}
+            <Link href="/goals" className="block min-w-0 group" aria-label="View your savings goals">
+              <article className="min-h-[5.5rem] h-full rounded-2xl border border-slate-700/70 bg-slate-950/35 p-5 transition-colors group-hover:border-sky-400/40">
+                <p className="text-fluid-eyebrow font-medium text-slate-300">Projected savings</p>
+                <p className="mt-2 text-fluid-stat font-bold text-cyan-300">
+                  INR {projectedSavings.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                </p>
+                {projectedIncome > 0 && (
+                  <p className={`mt-1 text-xs font-semibold ${projectedSavings >= projectedIncome * 0.2 ? "text-emerald-300" : "text-amber-300"}`}>
+                    {projectedSavings >= projectedIncome * 0.2 ? "↑" : "↓"} {Math.round((projectedSavings / projectedIncome) * 100)}% of target
+                  </p>
+                )}
+                <p className="mt-1 text-xs text-slate-400">{savingsHorizon}</p>
+              </article>
+            </Link>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {quickAnalytics.map((chip) => {
+          {/* ZEPH-FIX: budget health chip — CTA when no budget set, explicit over-budget label (issue 1, 6) */}
+          <div className="status-pill-row">
+            {noBudgetSetup ? (
+              <Link
+                href="/budgets/new"
+                className="premium-chip status-pill inline-flex items-center gap-2"
+              >
+                <CircleDollarSign aria-hidden="true" className="h-3.5 w-3.5" />
+                <span>Budget health</span>
+                <span className="text-amber-200">Add budget →</span>
+              </Link>
+            ) : (
+              <span
+                className={
+                  isBudgetOverLimit
+                    ? `${chipBase} status-pill border-rose-400/50 bg-rose-950/40 text-rose-100`
+                    : isBudgetNearLimit
+                    ? `${chipBase} status-pill border-amber-400/50 bg-amber-950/35 text-amber-100`
+                    : "premium-chip status-pill inline-flex items-center gap-2"
+                }
+              >
+                {isBudgetOverLimit && <span aria-label="Over budget" role="img">⚠️</span>}
+                <CircleDollarSign aria-hidden="true" className="h-3.5 w-3.5" />
+                <span>Budget health</span>
+                <span className={isBudgetOverLimit ? "text-rose-200" : isBudgetNearLimit ? "text-amber-200" : "text-sky-200"}>
+                  {isBudgetOverLimit ? `Over budget (${displayUtilization}%)` : `${displayUtilization}% utilized`}
+                </span>
+                {/* ZEPH-FIX: resolution CTA inside overflow chip (issue 18) */}
+                {isBudgetOverLimit && (
+                  <Link href="/budgets" className="ml-0.5 text-rose-300 underline underline-offset-2 hover:text-rose-200 font-semibold">
+                    → Fix
+                  </Link>
+                )}
+              </span>
+            )}
+            {/* ZEPH-FIX: AI coverage chip links to transactions (issue 14) */}
+            {quickAnalytics.filter((chip) => chip.label !== "Budget health").map((chip) => {
               const Icon = chip.icon;
+              if (chip.label === "AI coverage") {
+                return (
+                  <Link
+                    key={chip.label}
+                    href="/transactions"
+                    className="premium-chip status-pill inline-flex items-center gap-2"
+                    title={`${habitInsights.sampleSize} transactions auto-classified — click to review`}
+                  >
+                    <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+                    <span>{chip.label}</span>
+                    <span className="text-sky-200">{chip.value}</span>
+                  </Link>
+                );
+              }
               return (
-                <span key={chip.label} className="premium-chip inline-flex items-center gap-2">
+                <span key={chip.label} className="premium-chip status-pill inline-flex items-center gap-2">
                   <Icon aria-hidden="true" className="h-3.5 w-3.5" />
                   <span>{chip.label}</span>
                   <span className="text-sky-200">{chip.value}</span>
@@ -550,35 +689,246 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           Continue your workflow with high-signal controls and clean, focused navigation.
         </p>
 
-        <ol className="mt-5 grid gap-4 sm:grid-cols-3">
-          <li className="premium-action-card rounded-2xl p-5">
-            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-slate-300">Explore</p>
+        <ol className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 items-stretch">
+          {/* ZEPH-FIX: sentence-case labels, setup CTAs when no data (issues 2, 6, 11) */}
+          <li className="premium-action-card rounded-2xl p-5 flex flex-col">
+            <p className="text-fluid-eyebrow font-semibold text-slate-300">Explore</p>
             <Link className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 hover:text-cyan-100" href="/transactions">
               <Wallet aria-hidden="true" className="h-4 w-4" />
               Transaction history
               <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
             </Link>
             <p className="mt-2 text-xs text-slate-300">Review and refine transaction quality with full search.</p>
+            <Link href="/transactions" className="quick-action-cta text-cyan-300 hover:text-cyan-200">
+              <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
+              Open transactions →
+            </Link>
           </li>
-          <li className="premium-action-card rounded-2xl p-5">
-            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-slate-300">Optimize</p>
+          <li className="premium-action-card rounded-2xl p-5 flex flex-col">
+            <p className="text-fluid-eyebrow font-semibold text-slate-300">Optimize</p>
             <Link className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-indigo-200 hover:text-indigo-100" href="/budgets">
               <CircleDollarSign aria-hidden="true" className="h-4 w-4" />
               Budget control center
               <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
             </Link>
             <p className="mt-2 text-xs text-slate-300">Track utilization and detect risk before limits are breached.</p>
+            {dashboardBudgetList.length === 0 ? (
+              <Link href="/budgets/new" className="quick-action-cta text-amber-300 hover:text-amber-200">
+                <Sparkles aria-hidden="true" className="h-3 w-3" />
+                Set up your first budget →
+              </Link>
+            ) : (
+              <Link href="/budgets" className="quick-action-cta text-indigo-300 hover:text-indigo-200">
+                <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
+                Manage budgets →
+              </Link>
+            )}
           </li>
-          <li className="premium-action-card rounded-2xl p-5">
-            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-slate-300">Accelerate</p>
+          <li className="premium-action-card rounded-2xl p-5 flex flex-col">
+            <p className="text-fluid-eyebrow font-semibold text-slate-300">Accelerate</p>
             <Link className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-violet-200 hover:text-violet-100" href="/goals">
               <Flag aria-hidden="true" className="h-4 w-4" />
               Goals and milestones
               <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
             </Link>
             <p className="mt-2 text-xs text-slate-300">Maintain momentum and convert intent into measurable savings.</p>
+            {dashboardGoalProgress.length === 0 ? (
+              <Link href="/goals/new" className="quick-action-cta text-amber-300 hover:text-amber-200">
+                <Sparkles aria-hidden="true" className="h-3 w-3" />
+                Create your first goal →
+              </Link>
+            ) : (
+              // ZEPH-FIX: show "View goals" when goals already exist (issue 16)
+              <Link href="/goals" className="quick-action-cta text-violet-300 hover:text-violet-200">
+                <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
+                View your goals →
+              </Link>
+            )}
           </li>
         </ol>
+      </section>
+
+      <BankStatementUpload />
+
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-50">Imported statement intelligence</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              Recent uploaded statements feed debit transactions into Zeph while preserving full credit, balance, and recurring-payment context in a separate secure document layer.
+            </p>
+          </div>
+          <Link
+            className="text-sm font-medium text-cyan-200 hover:text-cyan-100"
+            href="/transactions?source=bank"
+          >
+            Open bank-linked transactions
+          </Link>
+        </div>
+
+        {financialDocumentsError ? (
+          <p className="mt-4 rounded-md border border-rose-300/40 bg-rose-950/30 px-3 py-2 text-sm text-rose-100">
+            Could not load uploaded statement summaries right now.
+          </p>
+        ) : (financialDocuments?.length ?? 0) === 0 ? (
+          <p className="mt-4 rounded-md border border-slate-300/35 bg-slate-950/30 px-3 py-2 text-sm text-slate-200">
+            No bank statements uploaded yet. Upload one to unlock document-driven income, balance, and recurring payment insights.
+          </p>
+        ) : (
+          <div className="mt-5 space-y-4">
+            {(financialDocuments ?? []).map((document) => {
+              const analysis = document.extracted_summary;
+              const savingsRateLabel = analysis?.savingsRate === null || analysis?.savingsRate === undefined
+                ? "N/A"
+                : `${analysis.savingsRate}%`;
+
+              return (
+                <article
+                  className="rounded-[1.6rem] border border-slate-300/30 bg-slate-950/28 p-5 shadow-[0_22px_42px_-30px_rgba(15,23,42,0.9)]"
+                  key={document.id}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-cyan-300/35 bg-cyan-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-100">
+                          {document.parse_status}
+                        </span>
+                        {document.bank_name ? (
+                          <span className="text-xs font-medium text-slate-300">{document.bank_name}</span>
+                        ) : null}
+                      </div>
+                      <h3 className="mt-3 text-base font-semibold text-slate-100">{document.file_name}</h3>
+                      <p className="mt-2 text-sm text-slate-300">
+                        {document.account_holder_name ?? "Account holder not detected"}
+                        {document.account_number_masked ? ` • ${document.account_number_masked}` : ""}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {document.statement_period_start
+                          ? `${new Date(document.statement_period_start).toLocaleDateString("en-IN")} to ${new Date(document.statement_period_end ?? document.statement_period_start).toLocaleDateString("en-IN")}`
+                          : `Uploaded ${new Date(document.created_at).toLocaleString("en-IN")}`}
+                      </p>
+                    </div>
+
+                    <form action={deleteFinancialDocument}>
+                      <input type="hidden" name="documentId" value={document.id} />
+                      <input type="hidden" name="returnTo" value="/dashboard" />
+                      <button
+                        className="rounded-xl border border-rose-300/35 bg-rose-950/20 px-3 py-2 text-xs font-semibold text-rose-100 transition hover:bg-rose-950/35"
+                        type="submit"
+                      >
+                        Delete statement
+                      </button>
+                    </form>
+                    <Link
+                      className="rounded-xl border border-cyan-300/35 bg-cyan-950/20 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-950/35"
+                      href={`/statements/${document.id}`}
+                    >
+                      Open details
+                    </Link>
+                  </div>
+
+                  {document.parse_status === "failed" ? (
+                    <p className="mt-4 rounded-xl border border-rose-300/40 bg-rose-950/25 px-3 py-2 text-sm text-rose-100">
+                      {document.parse_error ?? "Statement parsing failed."}
+                    </p>
+                  ) : null}
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-2xl border border-slate-300/30 bg-slate-950/35 p-4">
+                      <p className="text-xs uppercase tracking-wide text-slate-400">Credits</p>
+                      <p className="mt-2 text-xl font-semibold text-emerald-200">INR {Number(document.total_credits).toFixed(0)}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-300/30 bg-slate-950/35 p-4">
+                      <p className="text-xs uppercase tracking-wide text-slate-400">Debits imported</p>
+                      <p className="mt-2 text-xl font-semibold text-cyan-200">{document.imported_debit_count}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-300/30 bg-slate-950/35 p-4">
+                      <p className="text-xs uppercase tracking-wide text-slate-400">Savings rate</p>
+                      <p className="mt-2 text-xl font-semibold text-slate-100">{savingsRateLabel}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-300/30 bg-slate-950/35 p-4">
+                      <p className="text-xs uppercase tracking-wide text-slate-400">Health score</p>
+                      <p className="mt-2 text-xl font-semibold text-violet-200">{analysis?.healthScore ?? "--"}</p>
+                    </div>
+                  </div>
+
+                  {analysis ? (
+                    <div className="mt-5 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+                      <div className="rounded-2xl border border-slate-300/30 bg-slate-950/30 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Financial health summary</p>
+                        <p className="mt-3 text-sm text-slate-200">{analysis.summary}</p>
+                        <p className="mt-3 inline-flex rounded-full border border-violet-300/35 bg-violet-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-violet-100">
+                          {analysis.financialHealth} • {analysis.balanceTrend} balance trend
+                        </p>
+
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          <div className="rounded-xl border border-slate-300/25 bg-slate-950/30 p-3 text-sm text-slate-200">
+                            <p className="text-xs uppercase tracking-wide text-slate-400">Top spend categories</p>
+                            <ul className="mt-2 space-y-2">
+                              {(analysis.topCategories ?? []).length === 0 ? (
+                                <li className="text-slate-400">No debit categories inferred yet.</li>
+                              ) : (analysis.topCategories ?? []).map((row) => (
+                                <li className="flex items-center justify-between gap-3" key={row.category}>
+                                  <span>{row.category}</span>
+                                  <span className="font-semibold text-slate-100">INR {row.amount.toFixed(0)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div className="rounded-xl border border-slate-300/25 bg-slate-950/30 p-3 text-sm text-slate-200">
+                            <p className="text-xs uppercase tracking-wide text-slate-400">Recurring payments</p>
+                            <ul className="mt-2 space-y-2">
+                              {(analysis.recurringPayments ?? []).length === 0 ? (
+                                <li className="text-slate-400">No recurring payment pattern detected yet.</li>
+                              ) : (analysis.recurringPayments ?? []).map((row) => (
+                                <li key={`${row.description}-${row.amount}`}>
+                                  <p className="font-medium text-slate-100">{row.description}</p>
+                                  <p className="text-xs text-slate-300">{row.occurrences} occurrences • INR {row.amount.toFixed(0)}</p>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-300/30 bg-slate-950/30 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Risk and recommendations</p>
+                        <div className="mt-3 space-y-3">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-rose-200">Risk indicators</p>
+                            <ul className="mt-2 space-y-2 text-sm text-slate-200">
+                              {(analysis.riskIndicators ?? []).length === 0 ? (
+                                <li className="rounded-xl border border-emerald-300/30 bg-emerald-950/20 px-3 py-2 text-emerald-100">
+                                  No immediate risk indicators were detected from this statement.
+                                </li>
+                              ) : (analysis.riskIndicators ?? []).map((item) => (
+                                <li className="rounded-xl border border-rose-300/30 bg-rose-950/20 px-3 py-2" key={item}>
+                                  {item}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-cyan-200">Recommendations</p>
+                            <ul className="mt-2 space-y-2 text-sm text-slate-200">
+                              {(analysis.recommendations ?? []).map((item) => (
+                                <li className="rounded-xl border border-cyan-300/25 bg-cyan-950/20 px-3 py-2" key={item}>
+                                  {item}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <section className="glass-card rounded-2xl p-6 sm:p-7">
@@ -648,8 +998,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </article>
 
           <article className="rounded-2xl border border-slate-700/60 bg-slate-950/35 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-400">Spending categories (current month)</p>
-            <SpendPieChart breakdown={pieBreakdown} wafflePalette={chartPalette} />
+            <p className="text-xs uppercase tracking-wide text-slate-400">{categoryChartLabel}</p>
+            <SpendPieChart breakdown={categoryChartBreakdown} wafflePalette={chartPalette} />
           </article>
         </div>
       </section>
@@ -682,12 +1032,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             />
           </label>
 
-          <label className="text-sm text-slate-200">
+          <label className="relative text-sm text-slate-200">
             <span className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-slate-300">
               <Bolt aria-hidden="true" className="h-3.5 w-3.5" /> Amount (INR)
             </span>
             <input
-              className="w-full rounded-xl border border-indigo-300/30 bg-slate-950/35 px-3 py-2.5 pl-7 text-sm"
+              className="w-full rounded-xl border border-indigo-300/30 bg-slate-950/35 px-3 py-2.5 pl-7 text-sm text-slate-100"
               min="0.01"
               name="amount"
               placeholder="0.00"
@@ -695,7 +1045,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               step="0.01"
               type="number"
             />
-            <span className="pointer-events-none absolute mt-[-2.05rem] ml-3 text-xs font-semibold text-slate-400">₹</span>
+            <span className="pointer-events-none absolute bottom-0 left-3 flex h-[2.375rem] items-center text-xs font-semibold text-slate-400">₹</span>
           </label>
 
           <label className="text-sm text-slate-200">
@@ -776,7 +1126,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 period === "this"
                   ? "border-cyan-400/65 bg-cyan-500/25 text-cyan-100"
                   : "border-slate-500/55 bg-slate-900/65 text-slate-300"
-              }`}
+              } touch-manipulation inline-flex min-h-10 items-center`}
               href={`/dashboard${queryString({ period: "this", categoryFocus })}`}
             >
               This week
@@ -786,7 +1136,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 period === "last"
                   ? "border-cyan-400/65 bg-cyan-500/25 text-cyan-100"
                   : "border-slate-500/55 bg-slate-900/65 text-slate-300"
-              }`}
+              } touch-manipulation inline-flex min-h-10 items-center`}
               href={`/dashboard${queryString({ period: "last", categoryFocus })}`}
             >
               Last week
@@ -812,7 +1162,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               {breakdown.map((row) => (
                 <li key={row.category}>
                   <Link
-                    className="flex items-center justify-between rounded-md border border-indigo-300/30 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 transition hover:bg-indigo-950/35"
+                    className="touch-manipulation flex min-h-10 items-center justify-between rounded-md border border-indigo-300/30 bg-slate-950/30 px-3 py-2 text-sm text-slate-100 transition hover:bg-indigo-950/35"
                     href={`/dashboard${queryString({ period, categoryFocus: row.category })}`}
                   >
                     <span className="inline-flex items-center gap-2">
@@ -954,6 +1304,31 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             ) : null}
           </>
         )}
+      </section>
+
+      <section className="glass-card rounded-2xl p-6 sm:p-7">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">Report export</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              Download user-scoped spending reports for the currently selected dashboard period.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a
+              className="inline-flex min-h-10 items-center rounded-md border border-cyan-300/40 bg-cyan-950/25 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-950/35"
+              href={`/api/reports/export?format=csv&period=${period}`}
+            >
+              Export CSV
+            </a>
+            <a
+              className="inline-flex min-h-10 items-center rounded-md border border-indigo-300/40 bg-indigo-950/25 px-3 py-2 text-xs font-semibold text-indigo-100 hover:bg-indigo-950/35"
+              href={`/api/reports/export?format=pdf&period=${period}`}
+            >
+              Export PDF
+            </a>
+          </div>
+        </div>
       </section>
 
       <section className="glass-card rounded-2xl p-6 sm:p-7">
@@ -1193,6 +1568,29 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 className="rounded-lg border border-amber-300/35 bg-slate-950/30 p-4"
                 key={transaction.id}
               >
+                {(() => {
+                  const status = getTransactionStatus({
+                    category: transaction.category,
+                    aiClassification: transaction.ai_classification,
+                    aiReviewState: transaction.ai_review_state,
+                  });
+                  const statusClasses = status === "flagged"
+                    ? "border-rose-300/45 bg-rose-950/35 text-rose-100"
+                    : status === "uncategorized"
+                      ? "border-amber-300/45 bg-amber-950/35 text-amber-100"
+                      : "border-emerald-300/45 bg-emerald-950/30 text-emerald-100";
+                  const label = status === "flagged"
+                    ? "Flagged"
+                    : status === "uncategorized"
+                      ? "Uncategorized"
+                      : "Categorized";
+
+                  return (
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-wide ${statusClasses}`}>
+                      {label}
+                    </span>
+                  );
+                })()}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-slate-100">
                     {transaction.merchant}
@@ -1212,6 +1610,24 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   {transaction.ai_reason ? ` • ${transaction.ai_reason}` : ""} • state=
                   {transaction.ai_review_state}
                 </p>
+
+                <details className="mt-2 rounded-lg border border-indigo-300/30 bg-slate-900/25 px-3 py-2">
+                  <summary className="cursor-pointer text-xs font-medium text-indigo-100">
+                    Original AI output (audit)
+                  </summary>
+                  <p className="mt-2 text-xs text-slate-300/85">
+                    Original label: {transaction.ai_raw_classification ?? "not recorded"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-300/85">
+                    Original reason: {transaction.ai_raw_reason ?? "not recorded"}
+                  </p>
+                  {transaction.ai_user_classification ? (
+                    <p className="mt-1 text-xs text-slate-300/85">
+                      User override: {transaction.ai_user_classification}
+                      {transaction.ai_user_reason ? ` • ${transaction.ai_user_reason}` : ""}
+                    </p>
+                  ) : null}
+                </details>
 
                 <form action={assignTransactionCategory} className="mt-3 flex flex-wrap items-center gap-2">
                   <input name="transactionId" type="hidden" value={transaction.id} />
@@ -1296,6 +1712,29 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           <ul className="mt-4 space-y-3">
             {transactionRows.map((transaction) => (
               <li className="rounded-lg border border-slate-300/30 bg-slate-950/30 p-4" key={transaction.id}>
+                {(() => {
+                  const status = getTransactionStatus({
+                    category: transaction.category,
+                    aiClassification: transaction.ai_classification,
+                    aiReviewState: transaction.ai_review_state,
+                  });
+                  const statusClasses = status === "flagged"
+                    ? "border-rose-300/45 bg-rose-950/35 text-rose-100"
+                    : status === "uncategorized"
+                      ? "border-amber-300/45 bg-amber-950/35 text-amber-100"
+                      : "border-emerald-300/45 bg-emerald-950/30 text-emerald-100";
+                  const label = status === "flagged"
+                    ? "Flagged"
+                    : status === "uncategorized"
+                      ? "Uncategorized"
+                      : "Categorized";
+
+                  return (
+                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-wide ${statusClasses}`}>
+                      {label}
+                    </span>
+                  );
+                })()}
                 <div className="flex items-center justify-between gap-3">
                   <label className="inline-flex items-center gap-2 text-sm text-slate-200">
                     <input
@@ -1415,7 +1854,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         )}
       </section>
 
-      <MobileFinanceNav active="/dashboard" />
     </main>
+    </AppShell>
   );
 }

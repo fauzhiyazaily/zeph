@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { archiveGoal, unarchiveGoal } from "@/app/goals/actions";
+import { AppShell } from "@/app/components/app-shell";
 import { type Goal } from "@/lib/goals/goal-helpers";
 import {
   buildGoalHistoryRows,
@@ -91,6 +92,11 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
   const start = (safePage - 1) * PAGE_SIZE;
   const end = start + PAGE_SIZE;
   const pageRows = filteredRows.slice(start, end);
+  const currentHistoryPath = `/goals/history${queryString({
+    filter: activeFilter,
+    q: searchQuery || undefined,
+    page: safePage,
+  })}`;
 
   const hasPrev = safePage > 1;
   const hasNext = safePage < totalPages;
@@ -108,7 +114,8 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
   };
 
   return (
-    <main className="finance-shell soft-fade-in relative mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-5 py-8 sm:px-8 sm:py-10">
+    <AppShell active="/goals">
+    <main className="app-content soft-fade-in relative mx-auto w-full max-w-[1600px] flex flex-col gap-6 px-4 py-5 lg:px-6 lg:py-6">
       <header className="glass-card rounded-2xl p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -165,23 +172,22 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
             ))}
           </div>
 
-          <input
-            type="text"
-            placeholder="Search goals..."
-            defaultValue={searchQuery}
-            className="flex-1 rounded-xl border border-slate-400/35 bg-slate-950/30 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-400 hover:bg-slate-900/55 sm:max-w-sm"
-            onChange={(e) => {
-              const q = e.currentTarget.value.trim();
-              const url = new URL(window.location.href);
-              if (q) {
-                url.searchParams.set("q", q);
-                url.searchParams.delete("page");
-              } else {
-                url.searchParams.delete("q");
-              }
-              window.location.href = url.toString();
-            }}
-          />
+          <form action="/goals/history" className="flex w-full gap-2 sm:max-w-sm" method="get">
+            {activeFilter !== "all" ? <input type="hidden" name="filter" value={activeFilter} /> : null}
+            <input
+              type="text"
+              name="q"
+              placeholder="Search goals..."
+              defaultValue={searchQuery}
+              className="flex-1 rounded-xl border border-slate-400/35 bg-slate-950/30 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-400 hover:bg-slate-900/55"
+            />
+            <button
+              type="submit"
+              className="rounded-xl border border-slate-400/35 bg-slate-950/25 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-100 hover:bg-slate-900/55"
+            >
+              Search
+            </button>
+          </form>
         </div>
 
         {error ? (
@@ -255,7 +261,7 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
                     {row.status === "archived" ? (
                       <form action={unarchiveGoal} className="inline">
                         <input type="hidden" name="goalId" value={row.goal.id} />
-                        <input type="hidden" name="returnTo" value={window.location.pathname + window.location.search} />
+                        <input type="hidden" name="returnTo" value={currentHistoryPath} />
                         <button
                           type="submit"
                           className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
@@ -266,7 +272,7 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
                     ) : (
                       <form action={archiveGoal} className="inline">
                         <input type="hidden" name="goalId" value={row.goal.id} />
-                        <input type="hidden" name="returnTo" value={window.location.pathname + window.location.search} />
+                        <input type="hidden" name="returnTo" value={currentHistoryPath} />
                         <button
                           type="submit"
                           className="rounded-md border border-slate-400/35 bg-slate-950/25 px-2.5 py-1.5 text-xs font-semibold text-slate-100 hover:bg-slate-900/55"
@@ -316,6 +322,8 @@ export default async function GoalsHistoryPage({ searchParams }: GoalsHistoryPag
           </>
         )}
       </section>
+
     </main>
+    </AppShell>
   );
 }

@@ -26,6 +26,9 @@ export type HabitInsightsResult = {
   insights: HabitInsight[];
 };
 
+const MIN_TOTAL_CLASSIFIED_ROWS = 6;
+const MIN_CURRENT_PERIOD_ROWS = 3;
+
 function inr(value: number) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -63,7 +66,7 @@ function uselessByCategory(rows: ClassifiedTransaction[]) {
       continue;
     }
 
-    const category = row.category?.trim() || "Uncategorized";
+    const category = normalizeCategoryLabel(row.category);
     const current = map.get(category) ?? { count: 0, amount: 0 };
     current.count += 1;
     current.amount += row.amount;
@@ -84,11 +87,21 @@ function uselessShare(rows: ClassifiedTransaction[]) {
   return Math.round((useless / classified) * 100);
 }
 
+function normalizeCategoryLabel(value: string | null) {
+  const cleaned = (value ?? "")
+    .replace(/[^\p{L}\p{N}\s&\-/.]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 40);
+
+  return cleaned.length > 0 ? cleaned : "Uncategorized";
+}
+
 export function buildHabitTrendInsights(rows: ClassifiedTransaction[]): HabitInsightsResult {
   const now = new Date();
   const sorted = [...rows].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  if (sorted.length < 6) {
+  if (sorted.length < MIN_TOTAL_CLASSIFIED_ROWS) {
     return {
       isSufficientHistory: false,
       sampleSize: sorted.length,
@@ -99,6 +112,15 @@ export function buildHabitTrendInsights(rows: ClassifiedTransaction[]): HabitIns
 
   const current30 = windowRows(sorted, now, 30, 0);
   const previous30 = windowRows(sorted, now, 30, 30);
+
+  if (current30.rows.length < MIN_CURRENT_PERIOD_ROWS) {
+    return {
+      isSufficientHistory: false,
+      sampleSize: sorted.length,
+      periodLabel: "Last 30 days",
+      insights: [],
+    };
+  }
 
   const currentUseless = uselessByCategory(current30.rows);
   const previousUseless = uselessByCategory(previous30.rows);

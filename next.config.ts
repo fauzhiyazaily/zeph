@@ -25,8 +25,12 @@ const cspHeader = [
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  turbopack: {
+    root: path.join(__dirname, ".."),
+  },
+  transpilePackages: ['@shared/ingestion'],
   serverExternalPackages: ["unpdf"],
-  outputFileTracingRoot: path.join(__dirname),
+  outputFileTracingRoot: path.join(__dirname, ".."),
   outputFileTracingIncludes: {
     "/*": ["../shared/ingestion/**/*"],
   },

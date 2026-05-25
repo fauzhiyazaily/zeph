@@ -1,25 +1,25 @@
-name: Ingestion Governance
+﻿name: Ingestion Governance
 
 on:
   pull_request:
     paths:
-      - "zeph/src/**"
-      - "zeph/scripts/**"
-      - "zeph/supabase/migrations/**"
+      - "src/**"
+      - "scripts/**"
+      - "supabase/migrations/**"
       - "shared/ingestion/**"
-      - "zeph/package.json"
-      - "zeph/vitest.config.ts"
-      - "zeph/.github/workflows/ingestion-governance.yml"
+      - "package.json"
+      - "vitest.config.ts"
+      - ".github/workflows/ingestion-governance.yml"
   push:
     branches: [main]
     paths:
-      - "zeph/src/**"
-      - "zeph/scripts/**"
-      - "zeph/supabase/migrations/**"
+      - "src/**"
+      - "scripts/**"
+      - "supabase/migrations/**"
       - "shared/ingestion/**"
-      - "zeph/package.json"
-      - "zeph/vitest.config.ts"
-      - "zeph/.github/workflows/ingestion-governance.yml"
+      - "package.json"
+      - "vitest.config.ts"
+      - ".github/workflows/ingestion-governance.yml"
 
 jobs:
   ingestion-governance:
@@ -36,7 +36,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: zeph/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -73,7 +73,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: zeph/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -99,7 +99,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: zeph/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci

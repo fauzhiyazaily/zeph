@@ -26,7 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: zeph
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,7 +62,6 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: zeph
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -89,7 +87,6 @@ jobs:
     needs: [ingestion-governance, replay-suites]
     defaults:
       run:
-        working-directory: zeph
     steps:
       - name: Checkout
         uses: actions/checkout@v4

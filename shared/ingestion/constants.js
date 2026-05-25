@@ -1,0 +1,2 @@
+export const INGESTION_SCHEMA_VERSION = '1.0.0';
+export const INGESTION_PIPELINE_VERSION = '1.0.0';

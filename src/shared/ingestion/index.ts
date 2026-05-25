@@ -1,4 +1,4 @@
-import * as sharedModule from "../../../../shared/ingestion/index.js";
+import * as sharedModule from "@shared/ingestion";
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 

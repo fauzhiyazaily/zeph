@@ -1,4 +1,3 @@
-import path from "path";
 import type { NextConfig } from "next";
 
 const isDev = process.env.NODE_ENV !== "production";
@@ -25,15 +24,8 @@ const cspHeader = [
 
 const nextConfig: NextConfig = {
   output: 'standalone',
-  turbopack: {
-    root: path.join(__dirname, ".."),
-  },
   transpilePackages: ['@shared/ingestion'],
   serverExternalPackages: ["unpdf"],
-  outputFileTracingRoot: path.join(__dirname, ".."),
-  outputFileTracingIncludes: {
-    "/*": ["../shared/ingestion/**/*"],
-  },
   poweredByHeader: false,
   async headers() {
     return [

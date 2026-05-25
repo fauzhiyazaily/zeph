@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "@shared/ingestion": "file:../shared/ingestion",
+    "@shared/ingestion": "file:./shared/ingestion",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.4",
     "framer-motion": "^12.38.0",

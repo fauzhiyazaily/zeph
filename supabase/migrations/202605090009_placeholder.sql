@@ -1,0 +1,2 @@
+-- Migration 202605090009 was applied directly on the remote database.
+-- This placeholder exists to keep local and remote migration history in sync.

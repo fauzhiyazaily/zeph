@@ -9,7 +9,7 @@ import {
 type ChatApiSuccess = {
   status: "success";
   answer: string;
-  provider: "anthropic" | "heuristic";
+  provider: "anthropic" | "gemini" | "heuristic";
   context: {
     transactionCount: number;
     totalSpend: number;
@@ -31,6 +31,7 @@ export function ChatClient() {
   const [question, setQuestion] = useState("");
   const [state, dispatch] = useReducer(reduceChatSubmissionState, initialChatSubmissionState);
   const [meta, setMeta] = useState<ChatApiSuccess["context"] | null>(null);
+  const [provider, setProvider] = useState<ChatApiSuccess["provider"] | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -64,6 +65,7 @@ export function ChatClient() {
 
       const payload = (await response.json()) as ChatApiSuccess;
       setMeta(payload.context);
+      setProvider(payload.provider);
       setTurns((current) => [
         ...current,
         { role: "user", content: question.trim() },
@@ -121,7 +123,9 @@ export function ChatClient() {
 
         {state.status === "success" && state.answer ? (
           <div className="space-y-3">
-            <p className="text-sm font-medium text-emerald-200">Success: response generated.</p>
+            <p className="text-sm font-medium text-emerald-200">
+              Success: response generated{provider ? ` (${provider} provider).` : "."}
+            </p>
             <p className="text-sm leading-6 text-slate-100">{state.answer}</p>
             {meta ? (
               <p className="text-xs text-slate-400">

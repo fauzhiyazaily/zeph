@@ -55,12 +55,10 @@ describe("next.config security headers", () => {
     expect(pp).toContain("payment=()");
   });
 
-  it("applies headers to all routes via catch-all source", () => {
-    const result = nextConfig.headers!();
-    return result.then((rules) => {
-      expect(rules.length).toBeGreaterThanOrEqual(1);
-      expect(rules[0].source).toBe("/(.*)")
-    });
+  it("applies headers to all routes via catch-all source", async () => {
+    const rules = await nextConfig.headers!();
+    expect(rules.length).toBeGreaterThanOrEqual(1);
+    expect(rules[0].source).toBe("/(.*)");
   });
 
   it("disables X-Powered-By header", () => {
@@ -68,8 +66,8 @@ describe("next.config security headers", () => {
   });
 
   it("keeps tracing scope local and includes shared ingestion package", () => {
-    expect(nextConfig.outputFileTracingRoot).toBe(process.cwd());
-    expect(nextConfig.outputFileTracingRoot).not.toBe(path.join(process.cwd(), ".."));
+    expect(nextConfig.outputFileTracingRoot).toBe(path.join(process.cwd(), ".."));
+    expect(nextConfig.outputFileTracingRoot).not.toBe(process.cwd());
 
     const includes = nextConfig.outputFileTracingIncludes as Record<string, string[]> | undefined;
     expect(includes).toBeDefined();

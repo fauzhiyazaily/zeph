@@ -34,38 +34,33 @@ function createSupabaseInsertMock() {
   return { supabase, getInsertedRow: () => insertedRow };
 }
 
-function buildPersistInput(overrides?: Partial<Parameters<typeof persistTransaction>[1]>) {
+type PersistInput = Parameters<typeof persistTransaction>[1];
+type PersistInputOverrides = Partial<Omit<PersistInput, "parsed">> & {
+  parsed?: Partial<PersistInput["parsed"]>;
+};
+
+function buildPersistInput(overrides?: PersistInputOverrides): PersistInput {
   const parsedOverrides = overrides?.parsed ?? {};
+  const { parsed: _ignoredParsed, ...inputOverrides } = overrides ?? {};
+  const parsed: PersistInput["parsed"] = {
+    merchant: "  ACME   BAKERY ",
+    amount: 125.2,
+    source: "bank",
+    source_version: "1.0.0",
+    reference: " R-99 ",
+    category: "Food",
+    financial_document_id: "doc-001",
+    timestamp: "2026-05-14T10:00:00.000Z",
+    ingestion_batch_id: "batch:manual:1",
+    ingested_at: "2026-05-14T10:00:01.000Z",
+    ...parsedOverrides,
+  } as PersistInput["parsed"];
+
   return {
     userId: "user-123",
     ingestionId: "manual:user-123:abc",
-    parsed: {
-      merchant: "  ACME   BAKERY ",
-      amount: 125.2,
-      source: "bank",
-      source_version: "1.0.0",
-      reference: " R-99 ",
-      category: "Food",
-      financial_document_id: "doc-001",
-      timestamp: "2026-05-14T10:00:00.000Z",
-      ingestion_batch_id: "batch:manual:1",
-      ingested_at: "2026-05-14T10:00:01.000Z",
-      ...parsedOverrides,
-    },
-    ...overrides,
-    parsed: {
-      merchant: "  ACME   BAKERY ",
-      amount: 125.2,
-      source: "bank",
-      source_version: "1.0.0",
-      reference: " R-99 ",
-      category: "Food",
-      financial_document_id: "doc-001",
-      timestamp: "2026-05-14T10:00:00.000Z",
-      ingestion_batch_id: "batch:manual:1",
-      ingested_at: "2026-05-14T10:00:01.000Z",
-      ...parsedOverrides,
-    },
+    parsed,
+    ...inputOverrides,
   };
 }
 

@@ -5,7 +5,6 @@ import {
   parseExportFormat,
   parseExportPeriod,
   resolvePeriodRange,
-  type ReportTransactionRow,
 } from "@/lib/reports/export";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 

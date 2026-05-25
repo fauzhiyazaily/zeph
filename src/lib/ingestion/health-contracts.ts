@@ -1,4 +1,3 @@
-import type { IngestionHealthSnapshot, IngestionAnomalyEntry } from "@/lib/ingestion/health";
 import type { AlertSeverity } from "@/shared/ingestion/index";
 
 /**

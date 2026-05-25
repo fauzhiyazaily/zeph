@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 const redirectMock = vi.fn((target: string) => {
@@ -13,12 +13,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("next/link", () => ({
-  default: ({ href, children }: { href: string; children: unknown }) =>
+  default: ({ href, children }: { href: string; children?: ReactNode }) =>
     createElement("a", { href }, children),
 }));
 
 vi.mock("@/app/components/app-shell", () => ({
-  AppShell: ({ children }: { children: unknown }) => children,
+  AppShell: ({ children }: { children?: ReactNode }) => children,
 }));
 
 vi.mock("@/app/dashboard/actions", () => ({

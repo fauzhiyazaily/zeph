@@ -3,8 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
-    "build": "next build --webpack",
+    "bmad-help": "npm run",
+    "dev": "next dev",
+    "dev:webpack": "next dev --webpack",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -20,6 +22,7 @@
     "db:push": "npx --yes supabase@2.101.0 db push"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@shared/ingestion": "file:../shared/ingestion",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.4",

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("@/app/components/app-shell", () => ({
-  AppShell: ({ children }: { children: unknown }) =>
+  AppShell: ({ children }: { children?: ReactNode }) =>
     createElement("div", { "data-testid": "app-shell" }, children),
 }));
 

@@ -23,7 +23,7 @@ const nextMock = vi.fn(({ request }: { request: RequestLike }) => ({
 }));
 
 vi.mock("@supabase/ssr", () => ({
-  createServerClient: (...args: unknown[]) => createServerClientMock(...args),
+  createServerClient: () => createServerClientMock(),
 }));
 
 vi.mock("next/server", () => ({
@@ -66,11 +66,12 @@ describe("updateSession", () => {
     const { updateSession } = await import("@/lib/supabase/middleware");
 
     const request = createRequest("/dashboard?tab=overview");
-    const response = await updateSession(request as never);
+    await updateSession(request as never);
 
-    expect(response.kind).toBe("redirect");
-    expect(response.headers.location).toContain("/sign-in");
-    expect(response.headers.location).toContain("next=%2Fdashboard%3Ftab%3Doverview");
+    expect(redirectMock).toHaveBeenCalledTimes(1);
+    const redirectUrl = redirectMock.mock.calls[0]?.[0] as URL;
+    expect(redirectUrl.toString()).toContain("/sign-in");
+    expect(redirectUrl.toString()).toContain("next=%2Fdashboard%3Ftab%3Doverview");
   });
 
   it("keeps signed-in users on protected routes", async () => {
@@ -78,9 +79,10 @@ describe("updateSession", () => {
     const { updateSession } = await import("@/lib/supabase/middleware");
 
     const request = createRequest("/dashboard");
-    const response = await updateSession(request as never);
+    await updateSession(request as never);
 
-    expect(response.kind).toBe("next");
+    expect(nextMock).toHaveBeenCalledTimes(1);
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 
   it("redirects unauthenticated chat route requests to sign-in", async () => {
@@ -88,11 +90,12 @@ describe("updateSession", () => {
     const { updateSession } = await import("@/lib/supabase/middleware");
 
     const request = createRequest("/chat");
-    const response = await updateSession(request as never);
+    await updateSession(request as never);
 
-    expect(response.kind).toBe("redirect");
-    expect(response.headers.location).toContain("/sign-in");
-    expect(response.headers.location).toContain("next=%2Fchat");
+    expect(redirectMock).toHaveBeenCalledTimes(1);
+    const redirectUrl = redirectMock.mock.calls[0]?.[0] as URL;
+    expect(redirectUrl.toString()).toContain("/sign-in");
+    expect(redirectUrl.toString()).toContain("next=%2Fchat");
   });
 
   it("redirects signed-in users away from auth pages", async () => {
@@ -100,9 +103,10 @@ describe("updateSession", () => {
     const { updateSession } = await import("@/lib/supabase/middleware");
 
     const request = createRequest("/sign-in");
-    const response = await updateSession(request as never);
+    await updateSession(request as never);
 
-    expect(response.kind).toBe("redirect");
-    expect(response.headers.location).toContain("/dashboard");
+    expect(redirectMock).toHaveBeenCalledTimes(1);
+    const redirectUrl = redirectMock.mock.calls[0]?.[0] as URL;
+    expect(redirectUrl.toString()).toContain("/dashboard");
   });
 });

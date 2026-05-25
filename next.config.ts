@@ -1,3 +1,4 @@
+import path from "path";
 import type { NextConfig } from "next";
 
 const isDev = process.env.NODE_ENV !== "production";
@@ -24,6 +25,9 @@ const cspHeader = [
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  turbopack: {
+    root: path.resolve(__dirname),
+  },
   transpilePackages: ['@shared/ingestion'],
   serverExternalPackages: ["unpdf"],
   poweredByHeader: false,
